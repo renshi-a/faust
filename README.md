@@ -2,7 +2,9 @@
 
 # Faust
 
-**Ship macOS apps your users can repair.**
+**Repairable apps: your users fix them by asking.**
+
+Faust is a launcher that makes a Rust app on macOS repairable.
 
 *Wer immer strebend sich bemüht, den können wir erlösen.*<br>
 <sub>Whoever strives, always, we can redeem. Goethe, Faust II</sub>
@@ -13,23 +15,16 @@
 
 </div>
 
-Until now, people had to take the apps they used as they came. If something didn't fit the
-way they worked, they could ask the developer and wait. Coding assistants have changed what
-a user can do: someone who doesn't program can describe a change in plain words and get code
-that makes it. Many people already build small apps for themselves this way. Faust brings
-the same thing to the apps you ship, so your users can change them too.
+People used to take apps as they came. Now anyone can describe a change in plain words and
+get the code for it, and many people build small apps for themselves this way. Faust lets
+the users of the apps you ship do the same.
 
-You wrap Faust around a Rust app and ship the app as source. When a user wants the app to
-work differently, they ask for it inside the app. The template starts with a menu item, but
-how the app takes requests is part of the app, so users can change that too. Claude Code
-rewrites their copy of the source, Faust builds and tests the new version, and the user
-switches to it only if everything passes and they agree. If the new version can't start, Faust goes back to the
-last one that did. When you ship an update, it is merged with the user's own changes.
+You ship the app as source, wrapped in Faust. A user asks for a change inside the app, and
+how they ask is part of the app, so they can change that too. Claude Code rewrites their
+copy, Faust builds and tests it, and they switch only if it passes and they agree. A version
+that can't start is rolled back, and your updates are merged with their changes.
 
-All of this happens on the user's Mac, so building can't depend on Xcode. Faust links with
-the `rust-lld` that ships with Rust, against a tiny SDK it writes itself. Neither you nor your
-users need Xcode to build the app; only `faust release` uses it, for `notarytool` and
-`stapler`.
+Building needs no Xcode, on your Mac or theirs.
 
 ```
 ┌─ Hello.app ─────────────────────────────────────────────────────────────┐
@@ -90,19 +85,17 @@ You need an Apple silicon Mac, [rustup](https://rustup.rs) and, to try changes, 
 
 ```sh
 cargo install --git https://github.com/renshi-a/faust faust-launcher   # the `faust` command
-faust new "Happy Day"               # a small app to start from
-cd "Happy Day"
-git init && git add -A && git commit -m "Start Happy Day"
-faust build                         # dist/Happy Day.app, built without Xcode
-faust dev                           # open it the way a user would
+faust new "Happy Day" && cd "Happy Day"                                # a small app to start from
+faust dev                           # builds it without Xcode and opens it the way a user would
 ```
 
 In the window that opens, choose **Happy Day ▸ Request a Change…** and ask for something,
 such as "make the text larger" or "add a button that says hello back". Faust handles the rest.
 
-When you are ready to hand it out:
+When you are ready to hand it out, commit and release (releases package what is committed):
 
 ```sh
+git init && git add -A && git commit -m "Start Happy Day"
 faust release                       # signs, notarizes and staples the app and a .dmg
 ```
 
@@ -175,11 +168,13 @@ has advice on what to put in it.
 | `faust new <folder>` | Creates an app from the template |
 | `faust build` | Builds `dist/<name>.app` with `rust-lld` only. Fails if anything reaches for Xcode or a C compiler |
 | `faust test` | Runs the app's tests, linked the same way |
-| `faust dev` | Packages the working tree and opens it as a user would, with its own state under `target/faust/dev` |
+| `faust dev` | Packages the working tree and opens it as a user would, with its own state under `target/faust/dev`. Builds first when there is no `Cargo.lock` yet |
 | `faust package` | Makes the `.app` users download, from HEAD (`--worktree` for uncommitted changes, `--dmg` for a disk image) |
 | `faust release` | Packages HEAD, signs it with your Developer ID, notarizes and staples the app and a `.dmg` |
 
-`faust build` also checks that an app can be built on a Mac without Xcode: if a crate compiles
+Faust links with the `rust-lld` that ships with Rust, against a tiny SDK it writes itself, so
+only `faust release` uses Xcode (for `notarytool` and `stapler`). `faust build` also checks
+that an app can be built on a Mac without Xcode: if a crate compiles
 C, it trips a wire, and the build stops and shows what was called. Rebuilds skip the first link
 stage while the code uses no new system functions, so a one-line change rebuilds in about a second.
 
