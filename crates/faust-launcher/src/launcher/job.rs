@@ -1,5 +1,6 @@
-//! The long work that runs while the app stays usable: let the assistant change the source,
-//! commit it, write the commit out to `versions/<n>` and check it there. It ends with an
+//! The long work that runs while the app stays usable: let the assistant change the source
+//! (once, or once per request when they are made again on an official update), commit it,
+//! write the commit out to `versions/<n>` and check it there. It ends with an
 //! [`Event::Job`]: a candidate to switch to, or why there is none.
 
 use std::path::PathBuf;
@@ -10,6 +11,7 @@ use gix::ObjectId;
 
 use super::assistant::{self, Assistant, Brief};
 use super::checks;
+use super::controller::{short, short_lines};
 use super::paths::Paths;
 use super::state::{Kind, now};
 use super::{Event, send};
@@ -38,6 +40,17 @@ pub(crate) enum Plan {
         title: String,
         assistant: Assistant,
     },
+    /// An official update that conflicts: the user's requests, oldest first, are asked for
+    /// again on top of it, each one built and tested before the next. It stops at the first
+    /// one that fails, and what was done before it is the candidate.
+    Replay {
+        upstream: ObjectId,
+        requests: Vec<String>,
+        release: u64,
+        notes: String,
+        title: String,
+        assistant: Assistant,
+    },
 }
 
 /// A version ready to be switched to.
@@ -52,6 +65,16 @@ pub(crate) struct Candidate {
     pub(crate) diff: PathBuf,
     /// The Rust release it was built with.
     pub(crate) rust: String,
+    /// Shown before the user is asked to switch: a replay that stopped part way, and why.
+    pub(crate) stopped: Option<Stopped>,
+}
+
+/// A replay that stopped before the last request.
+#[derive(Debug)]
+pub(crate) struct Stopped {
+    pub(crate) done: usize,
+    pub(crate) of: usize,
+    pub(crate) report: String,
 }
 
 #[derive(Debug)]
@@ -187,6 +210,73 @@ fn run(p: &Paths, spec: Spec) -> Result<Candidate, Fail> {
         })
     };
 
+    // Lets the assistant make `request` (with `prompt`) in the work tree, which holds `parent`,
+    // commits it on `try/<id>` and checks it; when the check fails, the assistant gets the end
+    // of the log and FIX_ROUNDS more tries. The commit and the assistant's summary.
+    let change = |assistant: &Assistant, prompt: &str, request: &str, parent: ObjectId| {
+        let name = assistant.name();
+        let couldnt = tr!(
+            en: "{name} couldn't make the changes",
+            ja: "{name} が変更できませんでした",
+            de: "{name} konnte die Änderungen nicht vornehmen",
+            it: "{name} non è riuscito ad apportare le modifiche",
+        );
+        let parent_tree = repo.tree_of(parent).map_err(fail(cant_read_changes()))?;
+        let mut out = assistant::run(assistant, &p.repo, prompt, None, &assistant_log, limits, &mut ui::progress::log)
+            .map_err(fail(couldnt))?;
+        let mut round = 0;
+        loop {
+            let tree = protected_tree(&repo, parent_tree, p, &spec.protect).map_err(fail(cant_read_changes()))?;
+            if tree == parent_tree {
+                let title = tr!(en: "The source didn't change", ja: "ソースは変わりませんでした", de: "Der Quellcode hat sich nicht geändert", it: "Il codice sorgente non è cambiato");
+                return Err(Fail { title, detail: out.summary });
+            }
+            let commit = repo
+                .commit(tree, &[parent], &change_message(request, &out.summary, assistant), signature_now())
+                .map_err(fail(cant_commit()))?;
+            repo.set_ref(&try_ref, commit, "candidate").map_err(fail(cant_commit()))?;
+            match check(commit) {
+                Ok(()) => return Ok((commit, out.summary)),
+                Err(e) if round < FIX_ROUNDS && !spec.cancel.load(Ordering::Relaxed) => {
+                    round += 1;
+                    say(&tr!(
+                        en: "The build or the tests failed, so {name} is fixing it (try {round})…",
+                        ja: "ビルドかテストが通らないので、{name} が直しています（{round} 回目）…",
+                        de: "Build oder Tests sind fehlgeschlagen, {name} korrigiert das (Versuch {round})…",
+                        it: "La compilazione o i test non sono riusciti, {name} sta correggendo (tentativo {round})…",
+                    ));
+                    let couldnt = tr!(
+                        en: "{name} couldn't fix it",
+                        ja: "{name} が直せませんでした",
+                        de: "{name} konnte es nicht korrigieren",
+                        it: "{name} non è riuscito a correggere",
+                    );
+                    let prompt = spec.brief.fix(&format!("{e:#}"));
+                    out = assistant::run(
+                        assistant,
+                        &p.repo,
+                        &prompt,
+                        out.session.take(),
+                        &assistant_log,
+                        limits,
+                        &mut ui::progress::log,
+                    )
+                    .map_err(fail(couldnt))?;
+                }
+                Err(e) => {
+                    let title = tr!(
+                        en: "The build or the tests failed",
+                        ja: "ビルドかテストが通りませんでした",
+                        de: "Build oder Tests sind fehlgeschlagen",
+                        it: "La compilazione o i test non sono riusciti",
+                    );
+                    return Err(Fail { title, detail: format!("{e:#}") });
+                }
+            }
+        }
+    };
+
+    let mut stopped = None;
     let (commit, kind, title, summary) = match spec.plan {
         Plan::Change { request, assistant } => {
             let name = assistant.name();
@@ -196,73 +286,8 @@ fn run(p: &Paths, spec: Spec) -> Result<Candidate, Fail> {
                 de: "{name} nimmt die Änderungen vor…",
                 it: "{name} sta apportando le modifiche…",
             ));
-            let couldnt = tr!(
-                en: "{name} couldn't make the changes",
-                ja: "{name} が変更できませんでした",
-                de: "{name} konnte die Änderungen nicht vornehmen",
-                it: "{name} non è riuscito ad apportare le modifiche",
-            );
-            let mut out = assistant::run(
-                &assistant,
-                &p.repo,
-                &spec.brief.change(&request),
-                None,
-                &assistant_log,
-                limits,
-                &mut ui::progress::log,
-            )
-            .map_err(fail(couldnt))?;
-            let mut round = 0;
-            loop {
-                let tree = protected_tree(&repo, main_tree, p, &spec.protect).map_err(fail(cant_read_changes()))?;
-                if tree == main_tree {
-                    let title = tr!(en: "The source didn't change", ja: "ソースは変わりませんでした", de: "Der Quellcode hat sich nicht geändert", it: "Il codice sorgente non è cambiato");
-                    return Err(Fail { title, detail: out.summary });
-                }
-                let commit = repo
-                    .commit(tree, &[main], &change_message(&request, &out.summary, &assistant), signature_now())
-                    .map_err(fail(cant_commit()))?;
-                repo.set_ref(&try_ref, commit, "candidate").map_err(fail(cant_commit()))?;
-                match check(commit) {
-                    Ok(()) => break (commit, Kind::Change, request.clone(), out.summary),
-                    Err(e) if round < FIX_ROUNDS && !spec.cancel.load(Ordering::Relaxed) => {
-                        round += 1;
-                        let name = assistant.name();
-                        say(&tr!(
-                            en: "The build or the tests failed, so {name} is fixing it (try {round})…",
-                            ja: "ビルドかテストが通らないので、{name} が直しています（{round} 回目）…",
-                            de: "Build oder Tests sind fehlgeschlagen, {name} korrigiert das (Versuch {round})…",
-                            it: "La compilazione o i test non sono riusciti, {name} sta correggendo (tentativo {round})…",
-                        ));
-                        let couldnt = tr!(
-                            en: "{name} couldn't fix it",
-                            ja: "{name} が直せませんでした",
-                            de: "{name} konnte es nicht korrigieren",
-                            it: "{name} non è riuscito a correggere",
-                        );
-                        let prompt = spec.brief.fix(&format!("{e:#}"));
-                        out = assistant::run(
-                            &assistant,
-                            &p.repo,
-                            &prompt,
-                            out.session.take(),
-                            &assistant_log,
-                            limits,
-                            &mut ui::progress::log,
-                        )
-                        .map_err(fail(couldnt))?;
-                    }
-                    Err(e) => {
-                        let title = tr!(
-                            en: "The build or the tests failed",
-                            ja: "ビルドかテストが通りませんでした",
-                            de: "Build oder Tests sind fehlgeschlagen",
-                            it: "La compilazione o i test non sono riusciti",
-                        );
-                        return Err(Fail { title, detail: format!("{e:#}") });
-                    }
-                }
-            }
+            let (commit, summary) = change(&assistant, &spec.brief.change(&request), &request, main)?;
+            (commit, Kind::Change, request, summary)
         }
         Plan::Build { commit, title, summary } => {
             repo.set_ref(&try_ref, commit, "official update").map_err(fail(cant_commit()))?;
@@ -323,13 +348,84 @@ fn run(p: &Paths, spec: Spec) -> Result<Candidate, Fail> {
             check(commit).map_err(fail(update_check_failed()))?;
             (commit, Kind::Update, title, out.summary)
         }
+        Plan::Replay { upstream, requests, release, notes, title, assistant } => {
+            let official = repo.tree_of(upstream).map_err(fail(cant_read_changes()))?;
+            repo.checkout(official, &p.repo).map_err(fail(cant_read_changes()))?;
+            let (name, n) = (assistant.name(), requests.len());
+            let (mut base, mut done, mut failure) = (upstream, 0, None);
+            for (i, request) in requests.iter().enumerate() {
+                let (k, what) = (i + 1, short(request, 50));
+                say(&tr!(
+                    en: "Asking {name} again ({k} of {n}): {what}",
+                    ja: "{name} にもう一度頼んでいます（{n} 件中 {k} 件目）: {what}",
+                    de: "{name} wird noch einmal gebeten ({k} von {n}): {what}",
+                    it: "Nuova richiesta a {name} ({k} di {n}): {what}",
+                ));
+                match change(&assistant, &spec.brief.replay(request, &title, &notes), request, base) {
+                    Ok((commit, _)) => (base, done) = (commit, done + 1),
+                    Err(f) => {
+                        failure = Some(f);
+                        break;
+                    }
+                }
+            }
+            let report = replay_report(&requests, done, failure.as_ref(), release);
+            if let Some(f) = failure {
+                if done == 0 || spec.cancel.load(Ordering::Relaxed) {
+                    let title = tr!(
+                        en: "{name} couldn't make your first request again",
+                        ja: "{name} が最初の頼みごとをやり直せませんでした",
+                        de: "{name} konnte deinen ersten Wunsch nicht neu umsetzen",
+                        it: "{name} non è riuscito a rifare la tua prima richiesta",
+                    );
+                    return Err(Fail { title, detail: format!("{report}\n\n{}", f.detail) });
+                }
+                // versions/<id> holds the request that failed: check what was done before it.
+                repo.checkout(repo.tree_of(base).map_err(fail(cant_read_changes()))?, &p.repo)
+                    .map_err(fail(cant_read_changes()))?;
+                repo.set_ref(&try_ref, base, "official update").map_err(fail(cant_commit()))?;
+                check(base).map_err(fail(update_check_failed()))?;
+                stopped =
+                    Some(Stopped { done, of: n, report: format!("{report}\n\n{}", short_lines(f.detail.trim(), 8)) });
+            }
+            (base, Kind::Update, title, report)
+        }
     };
 
     let new_tree = repo.tree_of(commit).map_err(fail(cant_read_changes()))?;
     let (changes, text) = repo.diff(main_tree, new_tree).map_err(fail(cant_read_changes()))?;
     let diff = p.log(&format!("{id:04}.diff"));
     let _ = std::fs::write(&diff, text);
-    Ok(Candidate { id, commit, kind, title, summary, changes, diff, rust: spec.rust })
+    Ok(Candidate { id, commit, kind, title, summary, changes, diff, rust: spec.rust, stopped })
+}
+
+/// What a replay did: the requests made again, the one it stopped at and why, and the rest.
+/// `failure` is why it stopped at `requests[done]`.
+fn replay_report(requests: &[String], done: usize, failure: Option<&Fail>, release: u64) -> String {
+    let item = |r: &String| format!("• {}", short(r, 60));
+    let mut lines = vec![tr!(en: "Made again:", ja: "やり直したこと:", de: "Neu umgesetzt:", it: "Rifatte:")];
+    lines.extend(requests[..done].iter().map(item));
+    if done == 0 {
+        lines.push(tr!(en: "(none)", ja: "（なし）", de: "(keine)", it: "(nessuna)"));
+    }
+    let Some(f) = failure else { return lines.join("\n") };
+    lines.push(String::new());
+    lines.push(tr!(en: "Stopped at:", ja: "止まったところ:", de: "Angehalten bei:", it: "Interrotto a:"));
+    lines.push(item(&requests[done]));
+    lines.push(format!("  {}", f.title));
+    if done + 1 < requests.len() {
+        lines.push(String::new());
+        lines.push(tr!(en: "Not asked again:", ja: "まだ頼んでいないこと:", de: "Nicht neu angefragt:", it: "Non richieste di nuovo:"));
+        lines.extend(requests[done + 1..].iter().map(item));
+    }
+    lines.push(String::new());
+    lines.push(tr!(
+        en: "Your changes as they were are kept in refs/heads/before/{release}.",
+        ja: "あなたの変更は、元のまま refs/heads/before/{release} に残してあります。",
+        de: "Deine Änderungen, wie sie waren, bleiben in refs/heads/before/{release}.",
+        it: "Le tue modifiche com'erano restano in refs/heads/before/{release}.",
+    ));
+    lines.join("\n")
 }
 
 /// The work tree as a tree, with the protected paths as they are in `reference`, and put back
@@ -373,5 +469,19 @@ mod tests {
         assert!(m.starts_with("Make the button blue\n\nRequest:\n"), "{m}");
         assert_eq!(requests_in(&m), Some("Make the button blue\nand round"));
         assert_eq!(requests_in("Official version 1.0"), None);
+    }
+
+    #[test]
+    fn replay_reports_where_it_stopped() {
+        let requests: Vec<String> =
+            ["Make the water green", "Add a comment\nat the end", "Round the corners"].map(str::to_owned).into();
+        let all = replay_report(&requests, 3, None, 7);
+        assert!(all.contains("• Round the corners") && !all.contains("before/7"), "{all}");
+        let f = Fail { title: "The build or the tests failed".into(), detail: "error[E0308]".into() };
+        let part = replay_report(&requests, 1, Some(&f), 7);
+        assert!(part.starts_with("Made again:\n• Make the water green\n\nStopped at:\n• Add a comment…\n"), "{part}");
+        assert!(part.contains("Not asked again:\n• Round the corners") && part.contains("before/7"), "{part}");
+        let none = replay_report(&requests[..1], 0, Some(&f), 7);
+        assert!(none.contains("(none)") && !none.contains("Not asked again"), "{none}");
     }
 }

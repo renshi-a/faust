@@ -9,7 +9,7 @@ use serde_json::json;
 
 use super::assistant::{self, Assistant, Brief, Choice};
 use super::controller::{Controller, cancel_title, short_lines};
-use super::job::{self, Candidate, Outcome, Plan};
+use super::job::{self, Candidate, Outcome, Plan, Stopped};
 use super::model::{self, Endpoint};
 use super::state::{Kind, Status, Version, now};
 use super::versions::switch_title;
@@ -439,7 +439,12 @@ impl Controller {
         self.job = None;
         ui::progress::close();
         match out {
-            Outcome::Candidate(c) => self.offer_switch(c),
+            Outcome::Candidate(c) => {
+                if let Some(s) = &c.stopped {
+                    self.tell_stopped(c.id, s);
+                }
+                self.offer_switch(c);
+            }
             Outcome::Failed { title, detail, log: log_file } => {
                 log(&format!("the job failed: {title}"));
                 self.reset_worktree();
@@ -458,6 +463,27 @@ impl Controller {
                 log("the job was cancelled");
                 self.reset_worktree();
             }
+        }
+    }
+
+    /// A replay stopped part way: what was made again, where it stopped and why, before the
+    /// user is asked whether to switch to what was done.
+    fn tell_stopped(&self, id: u32, s: &Stopped) {
+        let (done, of, report) = (s.done, s.of, &s.report);
+        let title = tr!(
+            en: "{done} of {of} requests were made again",
+            ja: "{of} 件のうち {done} 件をやり直しました",
+            de: "{done} von {of} Wünschen wurden neu umgesetzt",
+            it: "Rifatte {done} richieste su {of}",
+        );
+        let text = tr!(
+            en: "{report}\n\nNext, you can switch to what was made again.",
+            ja: "{report}\n\n次に、やり直せた分までに切り替えるかを聞きます。",
+            de: "{report}\n\nAls Nächstes kannst du zu dem wechseln, was neu umgesetzt wurde.",
+            it: "{report}\n\nOra puoi passare a quanto è stato rifatto.",
+        );
+        if ui::alert(&title, &text, &["OK", &ui::show_log_title()]) == 1 {
+            ui::open_text(&self.p.log(&format!("{id:04}-build.log")));
         }
     }
 

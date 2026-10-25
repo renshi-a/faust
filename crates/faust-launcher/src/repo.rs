@@ -8,6 +8,7 @@
 //!   `refs/heads/try/<n>`     every candidate, kept
 //!   `refs/heads/wip/<time>`  files the user edited by hand, saved before they were replaced
 //!   `refs/heads/before/<release>`  the user's changes, set aside for an official version
+//!                                  (or for their requests to be made again on it)
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;

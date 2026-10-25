@@ -12,8 +12,9 @@
 # 3 a change to a protected file is put back
 # 4 an official update that merges cleanly with the user's change
 # 5 an official update that conflicts: the assistant resolves it
-# 6 choosing an older version from the list
-# 7 uninstalling (a copy of the app, which ends up in the Trash)
+# 6 an official update that conflicts: the requests are made again on it; the second fails
+# 7 choosing an older version from the list
+# 8 uninstalling (a copy of the app, which ends up in the Trash)
 set -euo pipefail
 cd "${0%/*}/.."
 root="$PWD"
@@ -115,23 +116,41 @@ file_in "$support/faust/versions/0006" src/main.rs "(0.10, 0.70, 0.60)"
 /usr/bin/grep -rq '^<<<<<<< ' "$support/faust/versions/0006/src" && fail "conflict markers left in #6"
 
 # 6 -----------------------------------------------------------------------------
-# The list is newest first: #6 #5 #4 #2 #1, so #1 is item 4.
-run_launcher choose-older "0:4" versions "" "$work/res3"
-[[ "$(state current)" == 1 ]] || fail "current should be #1"
-[[ "$(git_ rev-parse main)" == "$(version_field 1 commit)" ]] || fail "main should be #1's commit"
-file_in "$support/faust/repo" src/main.rs '(0.20, 0.55, 0.95)'
+# The water's colour conflicts again. Answers: build, "Redo Your Requests", ask again, the
+# report of where it stopped, switch. "Make the water green" is made again; "Add a comment"
+# breaks the build and the two fixes change nothing, so it stops there.
+make_release "$work/res4" $((r0 + 3)) "$work/res3"
+/usr/bin/sed -i '' 's/(0.90, 0.30, 0.30)/(0.30, 0.30, 0.90)/' "$work/res4/source/src/main.rs"
+old_main="$(git_ rev-parse main)"
+run_launcher update-replays "0|1|0|0|0" "" "green-water,break" "$work/res4"
+[[ "$(state current)" == 7 && "$(version_field 7 kind)" == update ]] || fail "current should be the update #7"
+/usr/bin/grep -q "^green-water" "$fakelog" || fail "the assistant was not asked again"
+file_in "$support/faust/versions/0007" src/main.rs "(0.10, 0.70, 0.60)"
+file_in "$support/faust/versions/0007" src/main.rs "Hello (updated)"
+/usr/bin/grep -q "// A comment." "$support/faust/versions/0007/src/main.rs" && fail "#7 has the request that failed"
+[[ "$(git_ rev-parse "before/$((r0 + 3))")" == "$old_main" ]] || fail "before/<release> should hold the previous main"
+[[ "$(git_ rev-parse main^)" == "$(git_ rev-parse upstream)" ]] || fail "the request made again should sit on upstream"
+git_ log -1 --format=%B main | /usr/bin/grep -q "^Make the water green$" || fail "the request made again lost its request"
+
+# 7 -----------------------------------------------------------------------------
+# The list is newest first: #7 #6 #5 #4 #2 (#1 was pruned), so #2 is item 4.
+run_launcher choose-older "0:4" versions "" "$work/res4"
+[[ "$(state current)" == 2 ]] || fail "current should be #2"
+[[ "$(git_ rev-parse main)" == "$(version_field 2 commit)" ]] || fail "main should be #2's commit"
+file_in "$support/faust/repo" src/main.rs '(0.10, 0.70, 0.60)'
+/usr/bin/grep -q "Hello (updated)" "$support/faust/repo/src/main.rs" && fail "the work tree still has the updates"
 
 echo "== git (for people who have it) sees a sound repository"
 git_ fsck --no-progress 2>&1 | grep -v "^dangling" || true
 [[ -z "$(git_ status --porcelain)" ]] || { git_ status --short | head; fail "git status is not clean"; }
 git_ log --oneline --graph --all | head -20
 
-# 7 -----------------------------------------------------------------------------
+# 8 -----------------------------------------------------------------------------
 copy="$work/app copy/Hello.app"
 mkdir -p "${copy%/*}"; cp -R "$app" "$copy"
 L="$copy/Contents/MacOS/hello"
-# #1 lacks the update, so it is offered first: "Later", then uninstall, then OK.
-run_launcher uninstall "1|1|0" uninstall "" "$work/res3"
+# #2 lacks the update, so it is offered first: "Later", then uninstall, then OK.
+run_launcher uninstall "1|1|0" uninstall "" "$work/res4"
 [[ ! -e "$support" ]] || fail "the support folder is still there"
 [[ ! -e "$copy" ]] || fail "the app was not moved to the Trash"
 echo "PASS"

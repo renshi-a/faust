@@ -72,7 +72,8 @@ flowchart LR
    again.
 4. **Old versions are kept.** Every version and candidate is a commit, and going back is a menu
    item. Your updates are three-way merged with the user's changes. When they conflict, the AI
-   resolves it, or the user's changes are set aside on a branch they can get back.
+   resolves it, or makes what the user asked for again on your update, or the user's changes
+   are set aside on a branch they can get back.
 
 ## Quick start
 
