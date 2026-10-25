@@ -14,7 +14,8 @@ pub(crate) struct Paths {
     pub(crate) downloads: PathBuf,
     pub(crate) repo: PathBuf,
     pub(crate) versions: PathBuf,
-    /// Cargo's output, shared by every version so a rebuild is quick.
+    /// Cargo's output for the version the user last chose, which the next one starts from,
+    /// so a rebuild is quick.
     pub(crate) target: PathBuf,
     pub(crate) logs: PathBuf,
     pub(crate) state: PathBuf,

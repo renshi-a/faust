@@ -443,6 +443,7 @@ impl Controller {
             }
         }
         self.confirmation_closed(&id);
+        super::checks::keep_target(&self.p, &self.p.version_dir(c.id));
         self.state.rust.clone_from(&c.rust);
         self.state.versions.push(Version {
             id: c.id,

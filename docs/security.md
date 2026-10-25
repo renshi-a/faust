@@ -47,11 +47,14 @@ assistant ran, including when it resolves a conflicting update.
 
 **Building is sandboxed.** The build runs code from the source: build scripts, proc macros,
 tests and the app's self-test. That happens before the user agrees to use the version, so each
-step runs under `sandbox-exec`. It may write only to that version's own folder, cargo's
-output, cargo's download cache (not its `bin`) and the temporary folders. The repository, the
-state, the trusted devices, the other versions and the toolchain are read-only to it. It can't
-start `open`, `osascript`, `launchctl` and similar tools, nor reach LaunchServices or Apple
-Events, which would run work outside the sandbox. The crates are fetched in the same sandbox.
+step runs under `sandbox-exec`. It may write only to that version's own folder and the
+temporary folders. The repository, the state, the trusted devices, the other versions, the
+toolchain and the crates cargo downloaded are read-only to it. The crates are fetched first,
+in the same sandbox but in a step that runs no code from the source. Each version builds in
+its own copy of cargo's output, cloned from the version the user last chose, so a candidate
+that isn't used can't leave anything behind for later builds. It can't start `open`,
+`osascript`, `launchctl` and similar tools, nor reach LaunchServices or Apple Events, which
+would run work outside the sandbox.
 Whether the tests and the self-test run is decided by the shipped `faust.toml`, not by the
 version's own copy.
 
