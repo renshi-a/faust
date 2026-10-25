@@ -8,6 +8,7 @@
 #   FRESH=1 scripts/e2e.sh [work-dir]  # installs Rust into the work dir, as on a user's Mac (~540 MB)
 #
 # 1 setup, then a change whose first build fails; the assistant fixes it; switch
+# 1b talking to the app: a greeting is answered, a request it can't do suggests a change
 # 2 a change that builds but can't start: back to the previous version
 # 3 a change to a protected file is put back
 # 4 an official update that merges cleanly with the user's change
@@ -81,6 +82,17 @@ run_launcher setup-and-change "install|start|text:Make the water green|0|0" chan
 file_in "$support/faust/repo" src/main.rs "(0.10, 0.70, 0.60)"
 [[ "$(git_ rev-parse main)" == "$(version_field 2 commit)" ]] || fail "main should be #2's commit"
 git_ log -1 --format=%B main | /usr/bin/grep -q "^Request:" || fail "the commit message lacks the request"
+
+# 1b ----------------------------------------------------------------------------
+launcher_log="$support/faust/logs/launcher.log"
+next_id="$(state next_id)"
+run_launcher talk-greeting "0" "say:Hello" ""
+/usr/bin/grep -q "^talk: Hello " "$fakelog" || fail "the assistant was not asked to answer"
+/usr/bin/grep -q "the assistant suggests a change" "$launcher_log" && fail "a greeting suggested a change"
+run_launcher talk-suggests "1" "say:Make the water sing" ""
+/usr/bin/grep -q "^talk: Make the water sing " "$fakelog" || fail "the assistant was not asked to answer"
+/usr/bin/grep -q "the assistant suggests a change" "$launcher_log" || fail "no change was suggested"
+[[ "$(state next_id)" == "$next_id" && "$(state current)" == 2 ]] || fail "a declined suggestion made a version"
 
 # 2 -----------------------------------------------------------------------------
 run_launcher crash-rolls-back "text:Start faster|0|0|0" change "crash"

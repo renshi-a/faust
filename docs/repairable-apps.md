@@ -64,13 +64,17 @@ template's `src/main.rs` is deliberately plain.
 
 ## Let the app ask
 
-The template's field takes whatever the user writes, but an app that understands what the user
-wants can ask directly: `link.request_change(Some("Make the font larger"))`. Faust shows
-that text to the user before anything happens, so the app suggests and the user decides.
+The template's field passes on whatever the user writes with `link.say(text)`. Faust's
+assistant answers as the app (`Event::Reply`), reading its source to know what it can do, and
+only when the app can't do what was asked yet does it suggest a change, which Faust shows to
+the user before anything happens. "Hello" gets an answer, not a new version. An app that
+understands what the user wants can also ask directly:
+`link.request_change(Some("Make the font larger"))`. Either way, the app suggests and the user
+decides.
 
 How the app takes requests is part of the app, so it is the user's to change as well. A text
 field, a chat, or a loop that notices what the user keeps doing all work, as long as they end
-in `request_change`. Faust's side doesn't change: the user still confirms the request, the new
+in `say` or `request_change`. Faust's side doesn't change: the user still confirms the request, the new
 version still passes the checks, and holding Option at start still opens the version list.
 
 ## Updates

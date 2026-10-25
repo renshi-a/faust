@@ -17,6 +17,7 @@ mod sandbox;
 mod setup;
 mod shipped;
 mod state;
+mod talk;
 mod toolchain;
 mod uninstall;
 mod update;
@@ -41,6 +42,8 @@ pub(crate) enum Event {
     Reopen,
     Child(u64, ChildEvent),
     Job(Outcome),
+    /// The assistant answered what the user said to the app (run `serial`, the `say` id).
+    Talked(u64, String, anyhow::Result<assistant::Outcome>),
 }
 
 static EVENTS: OnceLock<Mutex<Sender<Event>>> = OnceLock::new();

@@ -1,6 +1,6 @@
 //! The controller, on its own thread: starts the current version and watches it, and
 //! reacts to the app, the dialogs and the jobs. The other parts of the loop live next door:
-//! setup, versions, change, update and uninstall each add their methods to [`Controller`].
+//! setup, versions, change, talk, update and uninstall each add their methods to [`Controller`].
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -25,7 +25,7 @@ use crate::repo::{MAIN, Repo};
 use crate::ui::{self, Button};
 
 /// The faust-link protocol this launcher speaks (docs/protocol.md).
-const PROTOCOL: &str = "1";
+const PROTOCOL: &str = "2";
 
 /// One start of the app.
 #[derive(Debug)]
@@ -57,6 +57,10 @@ pub(crate) struct Controller {
     pub(super) update_checked: bool,
     /// The user chose to uninstall: do it once the app has quit.
     pub(super) uninstalling: bool,
+    /// The assistant is answering what the user said to the app.
+    pub(super) talking: bool,
+    /// The conversation with the app's user so far, to continue it.
+    pub(super) talk_session: Option<super::assistant::Session>,
 }
 
 // Button titles used in more than one dialog.
@@ -145,6 +149,8 @@ impl Controller {
             boot_failures: 0,
             update_checked: false,
             uninstalling: false,
+            talking: false,
+            talk_session: None,
         }
     }
 
@@ -247,6 +253,8 @@ impl Controller {
             ("FAUST_LANG", crate::i18n::current().code().into()),
         ];
         self.serial += 1;
+        // A new start may be a new version, which can do what the last one couldn't.
+        self.talk_session = None;
         match child::spawn(&exe, &env, &self.p.log("app.log"), self.p.devices.clone(), self.serial) {
             Ok(c) => {
                 log(&format!("started version #{} (pid {})", v.id, c.pid));
@@ -346,6 +354,7 @@ impl Controller {
                     self.tell_assistant();
                 }
                 ChildEvent::Change(request) => self.ask_change(request),
+                ChildEvent::Say { id, text } => self.say(id, &text),
                 ChildEvent::Versions => self.pick_version(),
                 ChildEvent::ChooseAssistant => {
                     self.choose_assistant();
@@ -366,6 +375,7 @@ impl Controller {
                 }
             }
             Event::Job(out) => self.job_done(out),
+            Event::Talked(serial, id, answer) => self.talked(serial, &id, answer),
         }
     }
 
@@ -427,6 +437,9 @@ impl Controller {
         if let Some(t) = test_message() {
             log(&format!("(test: the app sends {t})"));
             let ev = match t.as_str() {
+                said if said.starts_with("say:") => {
+                    ChildEvent::Say { id: "test".into(), text: said["say:".len()..].to_owned() }
+                }
                 "change" => ChildEvent::Change(None),
                 "versions" => ChildEvent::Versions,
                 "assistant.choose" => ChildEvent::ChooseAssistant,

@@ -5,6 +5,12 @@ before 1.0, minor versions may change the configuration and the protocol.
 
 ## Unreleased
 
+- Talking to the app no longer always asks for a change. The template's field passes on what
+  the user writes; the assistant answers as the app, reading its source with tools that only
+  read, and suggests a change only when the app can't do what was asked yet. Faust asks once
+  per assistant whether it may read what the user writes.
+- Protocol 2: the app sends `say`, and Faust answers with `reply`. `faust-link` adds
+  `Link::say` and `Event::Reply`; `say` falls back to a change request with an older launcher.
 - The template's window shows water instead of a line of text: a wall of water falls onto a
   small dark planet and runs over it, ripples as the user types and follows the pointer. It is
   a fluid simulated on the GPU and drawn as glowing drops on a dark background, in shades that

@@ -12,7 +12,7 @@ does not cover.
 | The developer | ship a launcher and a first source that behave | |
 | The launcher | hold the rules below; it is signed and never rewritten | |
 | The source, once changed | | anything: it may have been rewritten in any way |
-| The assistant | edit files in the user's copy of the source | run commands, reach the network, touch anything else |
+| The assistant | edit files in the user's copy of the source; read it to answer what the user says to the app | run commands, reach the network, touch anything else |
 | The app, while it runs | ask for things (a change, the version list) | answer for the user |
 
 The rest follows from one rule: **nothing that protects the user is read from the source**,
@@ -26,6 +26,16 @@ request (in full), what the assistant may touch, and what it can do, and said ye
 is used until it passed the gate and the user said yes again, with the diff a click away. A
 request that comes from the app (`change` with text) is shown the same way: the app can
 suggest, not decide.
+
+**Talking to the app needs a yes too.** What the user writes to the app (`say`) goes to the
+assistant only after the user agreed, in Faust's own window, that this assistant may read it;
+the window says where it is sent. That yes is kept per assistant, outside the source. To answer,
+Claude Code gets only `--tools Read,Glob,Grep`, with the same restricted mode and settings as
+for a change; any other model is offered only the three tools that read, and Faust refuses a
+call to any other. A change the answer suggests is a request like any other: shown in full and
+confirmed before the assistant may edit anything. Once the user agreed, the app can send words
+of its own too; they can't change anything, but they are sent to the assistant, which costs
+what any request to it costs.
 
 **The assistant has a small box.** Claude Code runs in its restricted mode (`--restricted`):
 every settings file is ignored, the user's and any the repository holds, so a rewritten source

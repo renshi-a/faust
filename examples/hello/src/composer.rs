@@ -1,10 +1,11 @@
-//! The field where the person asks for a change, in the style of a chat input: a rounded
-//! box with a terracotta frame, a text view that grows to six lines (Enter sends, Shift+Enter
-//! is a new line), a pill that shows who makes the change and opens Faust's window for
-//! choosing another, and a send button. The box draws its own backgrounds, so they follow
-//! light and dark mode.
+//! The field where the person talks to the app, in the style of a chat input: a rounded box
+//! with a terracotta frame, the app's last answer, a text view that grows to six lines (Enter
+//! sends, Shift+Enter is a new line), a pill that shows who answers and makes the changes and
+//! opens Faust's window for choosing another, and a send button. Faust's assistant answers as
+//! the app, and when the app can't do what was asked yet, Faust asks whether to change it.
+//! The box draws its own backgrounds, so they follow light and dark mode.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char, c_void};
 
 use objc2::rc::{Allocated, Retained};
@@ -29,9 +30,10 @@ const EDGE: f64 = INSET + PADDING;
 /// NSEventModifierFlagShift
 const SHIFT: usize = 1 << 17;
 
-/// The box's height for a text area `text_h` high.
-fn height(text_h: f64) -> f64 {
-    EDGE + BAR_H + PADDING + 1.0 + PADDING + text_h + EDGE
+/// The box's height for a text area `text_h` high and an answer `reply_h` high (0 for none).
+fn height(text_h: f64, reply_h: f64) -> f64 {
+    let reply = if reply_h > 0.0 { reply_h + PADDING } else { 0.0 };
+    EDGE + BAR_H + PADDING + 1.0 + PADDING + text_h + reply + EDGE
 }
 
 /// Where the send button sits in a box with these bounds.
@@ -143,6 +145,10 @@ define_class!(
 );
 
 pub struct Parts {
+    /// The app's last answer, above the text; hidden while there is none.
+    reply: Id,
+    /// The id of what was sent, until its answer comes.
+    waiting: RefCell<Option<String>>,
     text: Retained<PlaceholderText>,
     scroll: Id,
     line: Id,
@@ -229,7 +235,7 @@ define_class!(
 );
 
 impl Composer {
-    /// A field `width` wide that asks Faust for a change with what is written in it.
+    /// A field `width` wide that sends what is written in it to Faust.
     pub fn new(mtm: MainThreadMarker, width: f64, placeholder: &str) -> Retained<Composer> {
         let text_w = width - EDGE * 2.0;
         // SAFETY: AppKit's documented messages, sent on the main thread with matching types.
@@ -281,7 +287,7 @@ impl Composer {
             }
             let secondary: Id = msg_send![class!(NSColor), secondaryLabelColor];
             let _: () = msg_send![&*pill, setContentTintColor: &*secondary];
-            let _: () = msg_send![&*pill, setToolTip: &*nsstring("Choose who makes the changes")];
+            let _: () = msg_send![&*pill, setToolTip: &*nsstring("Choose who answers and makes the changes")];
 
             let b: Allocated<AnyObject> = msg_send![class!(NSButton), alloc];
             let send: Id = msg_send![b, initWithFrame: Rect { x: 0.0, y: 0.0, w: SEND, h: SEND }];
@@ -299,7 +305,15 @@ impl Composer {
             let _: () = msg_send![&*send, setContentTintColor: &*white];
             let _: () = msg_send![&*send, setToolTip: &*nsstring("Send (Enter)")];
 
+            let reply: Id = msg_send![class!(NSTextField), wrappingLabelWithString: &*nsstring("")];
+            let font: Id = msg_send![class!(NSFont), systemFontOfSize: 14.0f64];
+            let _: () = msg_send![&*reply, setFont: &*font];
+            let _: () = msg_send![&*reply, setTextColor: &*secondary];
+            let _: () = msg_send![&*reply, setHidden: Bool::YES];
+
             let parts = Parts {
+                reply,
+                waiting: RefCell::new(None),
                 text,
                 scroll,
                 line,
@@ -310,9 +324,9 @@ impl Composer {
             };
             let this = Composer::alloc(mtm).set_ivars(parts);
             let this: Retained<Composer> =
-                msg_send![super(this), initWithFrame: Rect { x: 0.0, y: 0.0, w: width, h: height(LINE_HEIGHT) }];
+                msg_send![super(this), initWithFrame: Rect { x: 0.0, y: 0.0, w: width, h: height(LINE_HEIGHT, 0.0) }];
             let p = this.ivars();
-            for view in [&*p.scroll, &*p.line, &*p.pill, &*p.send] {
+            for view in [&*p.reply, &*p.scroll, &*p.line, &*p.pill, &*p.send] {
                 let _: () = msg_send![&*this, addSubview: view];
             }
             let _: () = msg_send![&*p.text, setDelegate: &*this];
@@ -364,15 +378,39 @@ impl Composer {
         rust_string(&s)
     }
 
-    /// Sends what is written to Faust, which shows it and asks before anything changes.
-    fn submit(&self) {
-        let text = self.text();
-        let request = text.trim();
-        if request.is_empty() {
+    /// Faust answered: shows the answer if it is the one this field is waiting for.
+    pub fn replied(&self, reply: &faust_link::Reply) {
+        if self.ivars().waiting.borrow().as_deref() != Some(reply.id.as_str()) {
             return;
         }
-        if let Some(link) = faust_link::get() {
-            link.request_change(Some(request));
+        self.ivars().waiting.replace(None);
+        self.show_reply(&reply.text);
+        self.changed();
+    }
+
+    fn show_reply(&self, text: &str) {
+        let reply = &self.ivars().reply;
+        // SAFETY: NSTextField and NSView messages on the main thread.
+        unsafe {
+            let _: () = msg_send![&**reply, setStringValue: &*nsstring(text)];
+            let _: () = msg_send![&**reply, setHidden: Bool::new(text.is_empty())];
+        }
+        self.layout();
+        // SAFETY: -[NSView setNeedsDisplay:] on the main thread.
+        let _: () = unsafe { msg_send![self, setNeedsDisplay: Bool::YES] };
+    }
+
+    /// Sends what is written to Faust, whose assistant answers as the app. A change it
+    /// suggests is shown to the person, who decides.
+    fn submit(&self) {
+        let text = self.text();
+        let said = text.trim();
+        if said.is_empty() || self.ivars().waiting.borrow().is_some() {
+            return;
+        }
+        if let Some(id) = faust_link::get().and_then(|link| link.say(said)) {
+            self.ivars().waiting.replace(Some(id));
+            self.show_reply("…");
         }
         // SAFETY: -[NSTextView setString:] on the main thread.
         let _: () = unsafe { msg_send![&*self.ivars().text, setString: &*nsstring("")] };
@@ -381,7 +419,7 @@ impl Composer {
 
     fn changed(&self) {
         let p = self.ivars();
-        let active = !self.text().trim().is_empty();
+        let active = !self.text().trim().is_empty() && p.waiting.borrow().is_none();
         p.send_active.set(active);
         // SAFETY: NSControl and NSView messages on the main thread.
         unsafe {
@@ -390,6 +428,21 @@ impl Composer {
             let _: () = msg_send![self, setNeedsDisplay: Bool::YES];
         }
         self.layout();
+    }
+
+    /// The answer's height at `width`, up to six lines; 0 while there is none.
+    fn reply_height(&self, width: f64) -> f64 {
+        let reply = &self.ivars().reply;
+        // SAFETY: NSView and NSCell messages on the main thread.
+        unsafe {
+            let hidden: Bool = msg_send![&**reply, isHidden];
+            if hidden.as_bool() {
+                return 0.0;
+            }
+            let cell: Id = msg_send![&**reply, cell];
+            let fit: Size = msg_send![&*cell, cellSizeForBounds: Rect { x: 0.0, y: 0.0, w: width, h: 1.0e4 }];
+            fit.h.ceil().min(LINE_HEIGHT * MAX_LINES)
+        }
     }
 
     /// The text's height at `width`, from one line to six.
@@ -418,8 +471,9 @@ impl Composer {
             let mut b: Rect = msg_send![self, bounds];
             let text_w = (b.w - EDGE * 2.0).max(LINE_HEIGHT);
             let text_h = self.text_height(text_w);
-            if (b.h - height(text_h)).abs() > 0.5 {
-                b.h = height(text_h);
+            let reply_h = self.reply_height(text_w);
+            if (b.h - height(text_h, reply_h)).abs() > 0.5 {
+                b.h = height(text_h, reply_h);
                 let _: () = msg_send![self, setFrameSize: Size { w: b.w, h: b.h }];
             }
             let send = send_frame(b);
@@ -432,8 +486,10 @@ impl Composer {
             let line_y = EDGE + BAR_H + PADDING;
             let _: () =
                 msg_send![&*p.line, setFrame: Rect { x: INSET + 1.5, y: line_y, w: b.w - (INSET + 1.5) * 2.0, h: 1.0 }];
+            let text_y = line_y + 1.0 + PADDING;
+            let _: () = msg_send![&*p.scroll, setFrame: Rect { x: EDGE, y: text_y, w: text_w, h: text_h }];
             let _: () =
-                msg_send![&*p.scroll, setFrame: Rect { x: EDGE, y: line_y + 1.0 + PADDING, w: text_w, h: text_h }];
+                msg_send![&*p.reply, setFrame: Rect { x: EDGE, y: text_y + text_h + PADDING, w: text_w, h: reply_h }];
         }
     }
 }
@@ -444,8 +500,9 @@ mod tests {
 
     #[test]
     fn grows_with_the_text() {
-        assert!(height(LINE_HEIGHT * 2.0) > height(LINE_HEIGHT));
-        let b = Rect { x: 0.0, y: 0.0, w: 520.0, h: height(LINE_HEIGHT) };
+        assert!(height(LINE_HEIGHT * 2.0, 0.0) > height(LINE_HEIGHT, 0.0));
+        assert!(height(LINE_HEIGHT, 18.0) > height(LINE_HEIGHT, 0.0), "an answer makes room for itself");
+        let b = Rect { x: 0.0, y: 0.0, w: 520.0, h: height(LINE_HEIGHT, 0.0) };
         assert_eq!(send_frame(b).x + SEND + EDGE, b.w, "the send button sits in the right corner");
     }
 }

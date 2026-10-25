@@ -1,7 +1,7 @@
 //! Hello: a small macOS app that its users can change by asking.
 //!
 //! It opens one window with a ball of water that ripples as you type (`water.rs`), a field at
-//! the bottom for asking for a change, and "Choose a Version…" in its app menu. Those talk to
+//! the bottom for talking to it, and "Choose a Version…" in its app menu. Those talk to
 //! Faust through `faust_link`, which also tells Faust when the window is up and hears when to
 //! quit. AppKit is loaded at run time and reached
 //! through Objective-C messages, so the build needs no SDK and no Xcode.
@@ -62,7 +62,7 @@ define_class!(
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "AppTarget"]
-    #[ivars = OnceCell<Retained<composer::Composer>>] // the field, to show who makes changes
+    #[ivars = OnceCell<Retained<composer::Composer>>] // the field, for who answers and the answers
     struct Target;
 
     impl Target {
@@ -82,6 +82,11 @@ define_class!(
                     faust_link::Event::Assistant(name) => {
                         if let Some(field) = self.ivars().get() {
                             field.set_assistant(&name);
+                        }
+                    }
+                    faust_link::Event::Reply(reply) => {
+                        if let Some(field) = self.ivars().get() {
+                            field.replied(&reply);
                         }
                     }
                     _ => {}
@@ -209,7 +214,7 @@ fn window(mtm: MainThreadMarker, target: &Target) -> Id {
         let content: Id = msg_send![&*w, contentView];
         // The water fills the window, with the ball in the middle of what the field leaves.
         let mut covered = 0.0;
-        let field = faust_link::get().map(|_| composer::Composer::new(mtm, width - 40.0, "Ask Hello for a change"));
+        let field = faust_link::get().map(|_| composer::Composer::new(mtm, width - 40.0, "Ask Hello anything"));
         if let Some(f) = &field {
             let r: Rect = msg_send![&**f, frame];
             covered = 20.0 + r.h;

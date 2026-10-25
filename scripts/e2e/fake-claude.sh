@@ -2,11 +2,19 @@
 # A stand-in for Claude Code in scripts/e2e.sh. It answers --version, reads the prompt on
 # stdin, makes the change named by the next line of $FAKE_PLAN in the current directory (the
 # user's copy of examples/hello), and prints a result event like `claude -p --output-format
-# stream-json` does.
+# stream-json` does. Asked to answer what the user said to the app (only the tools that read),
+# it greets "Hello" and suggests a change for anything else, without touching the plan.
 set -euo pipefail
 if [[ "${1:-}" == "--version" ]]; then echo "9.9.9 (Claude Code)"; exit 0; fi
 if [[ "${1:-}" == "--help" ]]; then echo "  --restricted    Restricted mode"; exit 0; fi
-cat > /dev/null
+prompt="$(cat)"
+if [[ " $* " == *" --tools Read,Glob,Grep "* ]]; then
+  said="$(printf '%s\n' "$prompt" | /usr/bin/tail -1)"
+  echo "talk: $said | $*" >> "$FAKE_LOG"
+  if [[ "$said" == Hello ]]; then msg="Hello! I am water."; else msg="I can't do that yet. [[change: $said]]"; fi
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"%s","session_id":"fake-talk"}\n' "$msg"
+  exit 0
+fi
 mode="$(/usr/bin/head -1 "$FAKE_PLAN")"
 /usr/bin/tail -n +2 "$FAKE_PLAN" > "$FAKE_PLAN.tmp" && /bin/mv "$FAKE_PLAN.tmp" "$FAKE_PLAN"
 echo "$mode | $*" >> "$FAKE_LOG"
