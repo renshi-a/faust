@@ -27,7 +27,11 @@ Objective-C messages to AppKit (loaded at run time, so the build needs no Xcode)
   test to make the build pass.
 - Keep `--selftest` working: Faust runs it before it uses a new version.
 - Keep the calls to `faust_link`: `ready()` once the window is up, quitting on
-  `Event::Quit`, and the "Request a Change…" and "Choose a Version…" menu items.
+  `Event::Quit`, and the "Choose a Version…" menu item.
+- Keep at least one way for the person to ask for a change through `request_change`. The
+  "Request a Change…" menu item is only where the app starts: a text field, a chat, a button, or
+  the app noticing what the person keeps doing are all fine, and so is removing the menu item
+  when another way replaces it.
 
 ## Keep the person's data safe
 

@@ -20,9 +20,10 @@ that makes it. Many people already build small apps for themselves this way. Fau
 the same thing to the apps you ship, so your users can change them too.
 
 You wrap Faust around a Rust app and ship the app as source. When a user wants the app to
-work differently, they ask for it from the app's menu. Claude Code rewrites their copy of the
-source, Faust builds and tests the new version, and the user switches to it only if
-everything passes and they agree. If the new version can't start, Faust goes back to the
+work differently, they ask for it inside the app. The template starts with a menu item, but
+how the app takes requests is part of the app, so users can change that too. Claude Code
+rewrites their copy of the source, Faust builds and tests the new version, and the user
+switches to it only if everything passes and they agree. If the new version can't start, Faust goes back to the
 last one that did. When you ship an update, it is merged with the user's own changes.
 
 All of this happens on the user's Mac, so building can't depend on Xcode. Faust links with
@@ -69,8 +70,9 @@ flowchart LR
 1. **You ship source.** `faust package` makes a `.app` holding the launcher and the app's
    source. The first time it opens, Faust installs Rust into the app's own folder, puts the
    source in a git repository and builds the first version.
-2. **Users ask for changes.** From the app's menu (or from inside the app, if it can tell what
-   the user wants), Faust shows the request and asks before anything happens. Claude Code may
+2. **Users ask for changes.** They ask through whatever the app offers, such as a menu item or
+   a chat, and the app can suggest a change when it can tell what they want. Faust shows the
+   request and asks before anything happens. Claude Code may
    only read, write and search files in the user's copy of the source.
 3. **Every version passes the same checks.** A sandboxed build with tripwires on every C and
    Xcode tool, the app's tests, and its self-test. Then the user decides, and a trial run
