@@ -201,6 +201,11 @@ fn window(mtm: MainThreadMarker, target: &Target) -> Id {
         let w: Id = msg_send![w, initWithContentRect: Rect { x: 0.0, y: 0.0, w: width, h: height }, styleMask: 15usize, backing: 2usize, defer: Bool::NO];
         let _: () = msg_send![&*w, setTitle: &*nsstring("Hello")];
         let _: () = msg_send![&*w, setReleasedWhenClosed: Bool::NO];
+        // Dark, whatever the system uses, to go with the water's backdrop.
+        let dark: Option<Id> = msg_send![class!(NSAppearance), appearanceNamed: &*nsstring("NSAppearanceNameDarkAqua")];
+        if let Some(dark) = dark {
+            let _: () = msg_send![&*w, setAppearance: &*dark];
+        }
         let content: Id = msg_send![&*w, contentView];
         // The water fills the window, with the ball in the middle of what the field leaves.
         let mut covered = 0.0;

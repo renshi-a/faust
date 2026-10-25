@@ -3,12 +3,12 @@
 // Simulation: the material point method (MLS-MPM) on a 64³ grid. Each step, the drops hand
 // their mass and momentum to the grid (p2g_*), the grid moves them on (grid_update), and the
 // drops take their new velocity and its gradient back (g2p). At the centre of the grid is a
-// solid ball nobody sees; the water is pulled toward it and runs over it like a sea over a
-// small planet.
+// solid ball; the water is pulled toward it and runs over it like a sea over a small planet.
 //
-// Rendering, in screen space: the drops are drawn as little spheres into a depth texture and a
-// thickness texture, the depth is smoothed into one surface (smooth), and the surface is lit
-// with reflection, refraction and the colour water takes on with depth (composite).
+// Rendering: every drop is a small light, drawn out along its motion and brighter the faster
+// it goes, added up in a high-range texture (glow). A blurred copy of that makes it bloom
+// (bloom_*), and composite puts both over a dark backdrop and the planet. The drops are also
+// drawn as little spheres into a depth texture, so the pointer can find the water under it.
 
 #include <metal_stdlib>
 using namespace metal;
@@ -45,10 +45,10 @@ struct View {
     float4x4 inv_view;
     float4x4 inv_proj;
     float4 screen; // width, height, 1 / width, 1 / height (pixels)
-    float4 drop;   // x: drawn radius, y: grid-to-world scale, z: grid centre, w: smoothing radius
+    float4 drop;   // x: drawn radius, y: grid-to-world scale, z: grid centre, w: the planet's radius
     float4 sun;    // xyz: toward the light
     float4 eye;    // xyz: the camera
-    float4 water;  // rgb: the water's colour, w: thickness scale
+    float4 water;  // rgb: the water's colour (linear), w: how much light one drop gives
 };
 
 // A point in view space, from where it is on screen (0 to 1, y down) and how far away.
@@ -278,7 +278,8 @@ struct DepthOut {
     float z [[depth(any)]];
 };
 
-// The front of each drop's sphere: its distance from the camera, and the depth to test.
+// The front of each drop's sphere: its distance from the camera, and the depth to test. Only
+// the pointer uses it, to find the water under it.
 fragment DepthOut depth_fs(Sprite s [[stage_in]], constant View &u [[buffer(1)]]) {
     float r2 = dot(s.uv, s.uv);
     if (r2 > 1.0) discard_fragment();
@@ -290,43 +291,113 @@ fragment DepthOut depth_fs(Sprite s [[stage_in]], constant View &u [[buffer(1)]]
     return o;
 }
 
-// How much water each drop puts in front of the pixel; the passes add up.
-fragment float thickness_fs(Sprite s [[stage_in]], constant View &u [[buffer(1)]]) {
-    float r2 = dot(s.uv, s.uv);
-    if (r2 > 1.0) discard_fragment();
-    return 2.0 * sqrt(1.0 - r2) * u.drop.x * u.water.w;
+// The colour turned `a` radians around the grey axis: the same water, a little more teal one
+// way and a little more violet the other.
+static float3 hue(float3 c, float a) {
+    float3 k = float3(0.57735);
+    float cs = cos(a);
+    return max(c * cs + cross(k, c) * sin(a) + k * dot(k, c) * (1.0 - cs), 0.0);
 }
 
-// One direction of a bilateral blur: neighbours count less the further they are in depth, so
-// the drops melt into a surface but the edge of the water stays sharp.
-kernel void smooth(texture2d<float, access::read> src [[texture(0)]],
-                   texture2d<float, access::write> dst [[texture(1)]],
-                   constant View &u [[buffer(0)]],
-                   constant int2 &dir [[buffer(1)]],
-                   uint2 gid [[thread_position_in_grid]]) {
+struct Glow {
+    float4 pos [[position]];
+    float2 uv;
+    float3 light;
+};
+
+// Each drop as a small light, drawn out a little along the way it moves on screen. It is lit
+// by the sun and brightest at the planet's edge, and drops that a wave lifts high glow white,
+// like foam. Its colour drifts slowly around the water's own, in broad patches over the planet.
+// Drops on the far side of the planet barely show through it.
+vertex Glow glow_vs(uint vid [[vertex_id]],
+                    uint iid [[instance_id]],
+                    device const Particle *p [[buffer(0)]],
+                    constant View &u [[buffer(1)]]) {
+    Particle q = p[iid];
+    float3 world = (q.x - u.drop.z) * u.drop.y;
+    float3 c = (u.view * float4(world, 1.0)).xyz;
+    float r = u.drop.x * 0.4;
+    // How far it moves in a frame, on screen.
+    float2 moving = (u.view * float4(q.v * u.drop.y, 0.0)).xy * 0.5;
+    float trail = min(length(moving), r * 3.0);
+    float2 along = trail > 1e-6 ? normalize(moving) : float2(1.0, 0.0);
+    float2 across = float2(-along.y, along.x);
+    float2 uv = float2(float(vid & 1) * 2.0 - 1.0, float(vid >> 1) * 2.0 - 1.0);
+    // The quad reaches back along the trail, so the drop leads it.
+    float2 offset = along * (uv.x < 0.0 ? -(r + trail) : r) + across * uv.y * r;
+
+    float3 eye = u.eye.xyz;
+    float3 to = world - eye;
+    float far = length(to);
+    float3 d = to / far;
+    float planet = u.drop.w;
+    float b = dot(eye, d);
+    float h = b * b - (dot(eye, eye) - planet * planet);
+    bool hidden = h > 0.0 && -b - sqrt(h) < far - r;
+    float near = length(eye) - planet;
+    float fade = mix(1.0, 0.4, saturate((far - near) / (2.0 * planet)));
+
+    float3 up = normalize(world);
+    float lit = 0.15 + 1.1 * saturate(dot(up, u.sun.xyz));
+    float rim = pow(1.0 - abs(dot(up, d)), 2.0);
+    // How high above the planet, in cells: the water lies about two deep.
+    float height = length(world) / u.drop.y - planet / u.drop.y;
+    float foam = smoothstep(2.0, 3.2, height);
+    float fast = smoothstep(0.3, 2.5, length(q.v));
+    float t = u.sun.w;
+    float drift = sin(dot(up, float3(2.1, 1.3, -1.7)) + t * 0.07)
+                + 0.6 * sin(dot(up, float3(-1.1, 2.6, 0.9)) * 1.7 - t * 0.05);
+    float3 tint = hue(u.water.rgb, 0.2 * drift - 0.25 * rim);
+    float3 colour = mix(tint, mix(tint, float3(1.0), 0.7), max(foam, fast * 0.6));
+    // Not every drop is as bright, so the water sparkles a little.
+    uint hash = iid * 2654435761u;
+    float sparkle = 0.55 + float(hash >> 24) / 255.0 * 0.9;
+    Glow g;
+    g.uv = float2(uv.x < 0.0 ? -1.0 : 1.0, uv.y);
+    g.pos = u.proj * float4(c + float3(offset, 0.0), 1.0);
+    // The light is spread over the trail, so a moving drop isn't brighter for being longer,
+    // only for being fast.
+    g.light = colour * u.water.w * sparkle * (lit + rim) * (1.0 + 1.5 * fast + 2.0 * foam) * fade
+            * (hidden ? 0.05 : 1.0) * r / (r + trail * 0.6);
+    return g;
+}
+
+fragment half4 glow_fs(Glow g [[stage_in]]) {
+    float r2 = dot(g.uv, g.uv);
+    float soft = exp(-r2 * 4.0) * 0.6 + exp(-r2 * 25.0) * 1.5;
+    return half4(half3(g.light * soft), 0.0h);
+}
+
+// A quarter of the size, for the bloom.
+kernel void bloom_down(texture2d<float, access::read> src [[texture(0)]],
+                       texture2d<float, access::write> dst [[texture(1)]],
+                       uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= dst.get_width() || gid.y >= dst.get_height()) return;
+    uint2 last = uint2(src.get_width(), src.get_height()) - 1;
+    float3 sum = float3(0.0);
+    for (uint i = 0; i < 4; i++)
+    for (uint j = 0; j < 4; j++) {
+        sum += src.read(min(gid * 4 + uint2(i, j), last)).rgb;
+    }
+    dst.write(float4(sum / 16.0, 1.0), gid);
+}
+
+// One direction of a Gaussian blur.
+kernel void bloom_blur(texture2d<float, access::read> src [[texture(0)]],
+                       texture2d<float, access::write> dst [[texture(1)]],
+                       constant int2 &dir [[buffer(0)]],
+                       uint2 gid [[thread_position_in_grid]]) {
     int2 size = int2(src.get_width(), src.get_height());
     if (int(gid.x) >= size.x || int(gid.y) >= size.y) return;
-    float d = src.read(gid).r;
-    if (d <= 0.0) {
-        dst.write(float4(0.0), gid);
-        return;
-    }
-    float pixels = u.drop.w * u.proj[1][1] * 0.5 * u.screen.y / d;
-    int r = clamp(int(pixels), 1, 20);
-    float sigma = max(pixels * 0.5, 0.5);
-    float range = u.drop.x * 1.5;
-    float sum = 0.0;
+    float3 sum = float3(0.0);
     float total = 0.0;
-    for (int i = -r; i <= r; i++) {
-        int2 q = int2(gid) + dir * i;
-        if (q.x < 0 || q.y < 0 || q.x >= size.x || q.y >= size.y) continue;
-        float s = src.read(uint2(q)).r;
-        if (s <= 0.0) continue;
-        float w = exp(-float(i * i) / (2.0 * sigma * sigma)) * exp(-(s - d) * (s - d) / (2.0 * range * range));
-        sum += s * w;
+    for (int i = -12; i <= 12; i++) {
+        int2 q = clamp(int2(gid) + dir * i, int2(0), size - 1);
+        float w = exp(-float(i * i) / 50.0);
+        sum += src.read(uint2(q)).rgb * w;
         total += w;
     }
-    dst.write(float4(sum / max(total, 1e-6)), gid);
+    dst.write(float4(sum / total, 1.0), gid);
 }
 
 struct Full {
@@ -342,76 +413,39 @@ vertex Full full_vs(uint vid [[vertex_id]]) {
     return f;
 }
 
-// What the water reflects and refracts: a white photo studio, a grey floor far below, a large
-// softbox toward the light and a strip light opposite it. (What the camera sees around the
-// water is plain white.)
-static float3 studio(float3 d, constant View &u) {
-    float3 c = d.y >= 0.0 ? mix(float3(0.80), float3(1.0), smoothstep(0.0, 0.8, d.y))
-                          : mix(float3(0.85), float3(0.6), smoothstep(0.0, -0.3, d.y));
-    float3 key = u.sun.xyz;
-    float k = dot(d, key);
-    c += float3(1.0, 0.98, 0.95) * (smoothstep(0.93, 0.97, k) * 2.5 + pow(max(k, 0.0), 6.0) * 0.25);
-    // The strip: a narrow band, upright, on the other side.
-    float3 strip = normalize(float3(-key.x, 0.2, -key.z));
-    float side = dot(d, strip);
-    float across = abs(dot(d, normalize(cross(strip, float3(0.0, 1.0, 0.0)))));
-    c += float3(1.6) * smoothstep(0.75, 0.85, side) * smoothstep(0.12, 0.06, across);
-    return c;
-}
-
+// A dark backdrop, a faint violet haze of the water's colour around the planet, the planet itself
+// dark with a rim of light, and over it the drops' light and its bloom.
 fragment float4 composite_fs(Full f [[stage_in]],
-                             texture2d<float, access::read> depth [[texture(0)]],
-                             texture2d<float, access::read> thick [[texture(1)]],
+                             texture2d<float, access::read> glow [[texture(0)]],
+                             texture2d<float> bloom [[texture(1)]],
                              constant View &u [[buffer(0)]]) {
+    constexpr sampler linear(filter::linear, address::clamp_to_edge);
     uint2 px = uint2(f.pos.xy);
     float2 uv = (float2(px) + 0.5) * u.screen.zw;
     float3 eye = u.eye.xyz;
-    float3 ray = view_pos(uv, 1.0, u);
-    float3 dir = normalize((u.inv_view * float4(ray, 0.0)).xyz);
-    float d = depth.read(px).r;
-    if (d <= 0.0) return float4(1.0);
+    float3 dir = normalize((u.inv_view * float4(view_pos(uv, 1.0, u), 0.0)).xyz);
+    float3 water = u.water.rgb;
 
-    // The surface's normal, from the neighbour on whichever side is closer in depth.
-    int2 size = int2(depth.get_width(), depth.get_height());
-    float3 p = view_pos(uv, d, u);
-    float3 ddx = float3(0.0);
-    float3 ddy = float3(0.0);
-    float best_x = 1e9;
-    float best_y = 1e9;
-    for (int s = -1; s <= 1; s += 2) {
-        int2 qx = clamp(int2(px) + int2(s, 0), int2(0), size - 1);
-        int2 qy = clamp(int2(px) + int2(0, s), int2(0), size - 1);
-        float dx = depth.read(uint2(qx)).r;
-        float dy = depth.read(uint2(qy)).r;
-        if (dx > 0.0 && abs(dx - d) < best_x) {
-            best_x = abs(dx - d);
-            ddx = (view_pos((float2(qx) + 0.5) * u.screen.zw, dx, u) - p) * float(s);
-        }
-        if (dy > 0.0 && abs(dy - d) < best_y) {
-            best_y = abs(dy - d);
-            ddy = (view_pos((float2(qy) + 0.5) * u.screen.zw, dy, u) - p) * float(s);
-        }
+    float3 colour = mix(float3(0.012, 0.012, 0.024), float3(0.003, 0.0035, 0.006), uv.y);
+    float2 off = uv - 0.5;
+    colour *= 1.0 - 0.6 * dot(off, off);
+
+    float planet = u.drop.w;
+    float b = dot(eye, dir);
+    float h = b * b - (dot(eye, eye) - planet * planet);
+    float miss = sqrt(max(dot(eye, eye) - b * b, 0.0)) / planet;
+    colour += hue(water, -0.6) * 0.05 * exp(-max(miss - 1.0, 0.0) * 3.0);
+    if (h > 0.0) {
+        float3 at = eye + dir * (-b - sqrt(h));
+        float3 n = at / planet;
+        float rim = pow(1.0 - saturate(dot(n, -dir)), 3.0);
+        float lit = saturate(dot(n, u.sun.xyz));
+        colour = float3(0.002, 0.0025, 0.004) + hue(water, -0.4) * rim * 0.25 + water * lit * 0.015;
     }
-    float3 n = cross(ddx, ddy);
-    n = length(n) > 1e-12 ? normalize(n) : float3(0.0, 0.0, 1.0);
-    if (n.z < 0.0) n = -n;
-    float3 N = normalize((u.inv_view * float4(n, 0.0)).xyz);
-    float3 P = (u.inv_view * float4(p, 1.0)).xyz;
-    float3 V = normalize(eye - P);
 
-    float t = thick.read(px).r;
-    float3 absorb = exp(-t * (1.0 - u.water.rgb) * 10.0);
-    float3 refracted = refract(-V, N, 1.0 / 1.33);
-    // Bent less than a real ball bends it, so the white behind shows through the middle.
-    float3 behind = studio(normalize(mix(dir, refracted, 0.35)), u);
-    // Light scattered inside: deep water glows faintly in its own colour.
-    float3 body = behind * absorb + u.water.rgb * u.water.rgb * 0.1 * (1.0 - absorb);
-    float3 reflected = studio(reflect(-V, N), u);
-    float fresnel = 0.02 + 0.98 * pow(1.0 - saturate(dot(N, V)), 5.0);
-    float3 h = normalize(V + u.sun.xyz);
-    float glint = pow(saturate(dot(N, h)), 900.0) * 18.0 + pow(saturate(dot(N, h)), 60.0) * 0.15;
-    float3 colour = mix(body, reflected, fresnel) + float3(1.0, 0.95, 0.88) * glint;
-    // Where there is only a film of water, the edge fades into the white around it.
-    float edge = smoothstep(0.004, 0.04, t);
-    return float4(mix(float3(1.0), saturate(colour), edge), 1.0);
+    float3 light = glow.read(px).rgb + bloom.sample(linear, uv).rgb * 0.9;
+    // The brightest light spills into every channel, so it turns white rather than only blue.
+    light += max(max(light.r, max(light.g, light.b)) - 0.7, 0.0) * float3(0.45, 0.55, 0.6);
+    colour += 1.0 - exp(-light * 1.4);
+    return float4(saturate(colour), 1.0);
 }

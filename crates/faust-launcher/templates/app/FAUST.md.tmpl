@@ -9,8 +9,8 @@ you can't run commands.
 
 A macOS app written in Rust. `src/main.rs` opens the window and builds the menus,
 `src/water.rs` and `src/water.metal` are the water in the window: it falls onto a small
-planet nobody sees, runs over it, ripples as the person types and follows the pointer
-(simulated and drawn on the GPU with Metal, which compiles the shaders when the app starts;
+dark planet, runs over it, ripples as the person types and follows the pointer, and is drawn
+as glowing drops on a dark background (simulated and drawn on the GPU with Metal, which compiles the shaders when the app starts;
 `--selftest` compiles and runs them too), and
 `src/composer.rs` is the field at the bottom of the window where the person asks for a change.
 They talk to AppKit through Objective-C messages (loaded at run time, so the build needs no
