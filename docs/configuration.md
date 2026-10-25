@@ -84,7 +84,7 @@ A new version is used only when all of these pass.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `rules` | `"FAUST.md"` | The file Claude Code reads before it changes anything. |
+| `rules` | `"FAUST.md"` | The file the assistant reads before it changes anything. |
 | `protect` | `[]` | Paths the assistant must leave alone: files, or folders ending in `/`. If it changes one, Faust puts it back before committing. |
 
 ## `[package]`
@@ -108,7 +108,7 @@ only in a bundle `faust dev` made, or in a `faust` built with the `test-hooks` f
 | `FAUST_SYSTEM_RUST=1` | launcher | Use your `~/.rustup` and `~/.cargo` instead of installing Rust. (`faust dev` sets it.) |
 | `FAUST_DEV=1` | launcher | Take official updates without asking. (`faust dev` sets it.) |
 | `FAUST_LANG` | launcher | `en`, `ja`, `de` or `it` instead of the Mac's language. Passed on to the app. |
-| `FAUST_ASSISTANT` | launcher | The Claude Code executable to use. |
+| `FAUST_ASSISTANT` | launcher | The Claude Code executable to use, when the user hasn't chosen another model. |
 | `FAUST_RESOURCES` | launcher | Read the shipped source from this folder instead of the bundle. |
 | `FAUST_TEST_ANSWERS` | launcher | Answers for the next dialogs, separated by `\|`: a button index, `text:…` for a text field, `button:item` for the version list, `install` and `start` for the installer. |
 | `FAUST_TEST_MESSAGES` | launcher | Messages to act on as if the app sent them, one per start: `change`, `versions`, `uninstall`. |

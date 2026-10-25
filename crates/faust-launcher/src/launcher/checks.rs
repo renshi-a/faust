@@ -79,7 +79,11 @@ pub(crate) fn run(
     };
 
     let mut steps: Vec<(Step, f64, Command, f64)> = Vec::new();
-    let writable = Writable { dirs: vec![dir.to_owned(), p.target.clone()], cargo_home: p.cargo_home.clone() };
+    let writable = Writable {
+        dirs: vec![dir.to_owned(), p.target.clone()],
+        cargo_home: p.cargo_home.clone(),
+        secret: vec![p.assistant.clone()],
+    };
     let mut build = sandbox::command(&writable, &me);
     build.arg("build").arg("--build-number").arg(id.to_string());
     project_args(&mut build);

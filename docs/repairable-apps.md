@@ -5,7 +5,7 @@ an app the assistant changes well and one it keeps breaking.
 
 ## Write `FAUST.md` for a newcomer
 
-Claude Code reads `FAUST.md` before every change, and knows nothing else about the app. Write
+The assistant reads `FAUST.md` before every change, and knows nothing else about the app. Write
 it the way you would brief a capable contractor on their first day:
 
 - **What the app is**, in two sentences, and where things live: which file draws the window,
@@ -17,7 +17,8 @@ it the way you would brief a capable contractor on their first day:
 - **How to finish**: a few plain sentences on what changed, since they appear in the switch
   dialog and the commit message.
 
-Keep it short. A page the assistant follows beats three it skims.
+Keep it short. A page the assistant follows beats three it skims, and a small model on the
+user's Mac may follow nothing longer.
 
 ## Keep data readable by the previous version
 

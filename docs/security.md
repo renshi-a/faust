@@ -32,9 +32,18 @@ every settings file is ignored, the user's and any the repository holds, so a re
 can't add hooks or permissions; the file tools are confined to the working directory, which
 is the user's copy of the source. On top of that: `--tools Read,Edit,Write,Glob,Grep`, hooks
 turned off, `--strict-mcp-config` with no servers, a fixed `PATH`, and Faust's own variables
-removed from its environment. A Claude Code too old to have restricted mode isn't run. Paths
-listed in the shipped `[repair] protect` are restored after every run, including when it
-resolves a conflicting update.
+removed from its environment. A Claude Code too old to have restricted mode isn't run.
+
+Any other model the user chooses gets no tools of its own: it asks for one of five (list,
+read, search, write and edit files), and Faust carries the call out. Paths are taken relative
+to the repository; a path out of it, one inside `.git`, and any symbolic link on the way are
+refused, and nothing larger than 2 MB is read. No tool runs a command or reaches the network.
+Faust sends the requests itself, with `/usr/bin/curl`, only to the address the user typed. The
+API key is kept in `faust/assistant.json`, readable only by the user, out of the command line
+and the logs, and the build sandbox may not read it.
+
+Paths listed in the shipped `[repair] protect` are restored after every run, whichever
+assistant ran, including when it resolves a conflicting update.
 
 **Building is sandboxed.** The build runs code from the source: build scripts, proc macros,
 tests and the app's self-test. That happens before the user agrees to use the version, so each
@@ -70,13 +79,19 @@ the app to the Trash.
 
 ## What Faust does not cover
 
-- **The assistant's judgment.** Claude Code writes code that runs as the user. The two
+- **The assistant's judgment.** The assistant writes code that runs as the user. A small model
+  on the user's Mac makes more mistakes than a large hosted one; the checks catch the changes
+  that don't build or pass, not the ones that are merely wrong. The two
   confirmations, the diff and the rollback are there so a person stays in charge, but a change
   that does something harmful and still builds, passes its tests and starts is possible. Read
   the diff for anything you would not hand to a stranger.
 - **Prompt injection.** The assistant reads the source, including text a previous change put
   there. A crafted comment could try to steer a later change. Its tool limits bound what it can
   do directly; what it writes still goes through the same gate and confirmations.
+- **The model's server.** What the assistant reads (the source, the request, the build log) is
+  sent to the server the user chose, and Faust can't tell what that server keeps. A model on
+  the user's Mac keeps it there. The running app could read the API key, as it could read
+  anything else the user can.
 - **Reading and the network.** The sandbox stops writes, not reads, and Faust does not block
   the network during builds: build scripts and tests can read what the user can, and code in
   the source could send it somewhere.

@@ -184,17 +184,18 @@ fn run(p: &Paths, spec: Spec) -> Result<Candidate, Fail> {
 
     let (commit, kind, title, summary) = match spec.plan {
         Plan::Change { request, assistant } => {
+            let name = assistant.name();
             say(&tr!(
-                en: "Claude Code is making the changes…",
-                ja: "Claude Code が変更しています…",
-                de: "Claude Code nimmt die Änderungen vor…",
-                it: "Claude Code sta apportando le modifiche…",
+                en: "{name} is making the changes…",
+                ja: "{name} が変更しています…",
+                de: "{name} nimmt die Änderungen vor…",
+                it: "{name} sta apportando le modifiche…",
             ));
             let couldnt = tr!(
-                en: "Claude Code couldn't make the changes",
-                ja: "Claude Code が変更できませんでした",
-                de: "Claude Code konnte die Änderungen nicht vornehmen",
-                it: "Claude Code non è riuscito ad apportare le modifiche",
+                en: "{name} couldn't make the changes",
+                ja: "{name} が変更できませんでした",
+                de: "{name} konnte die Änderungen nicht vornehmen",
+                it: "{name} non è riuscito ad apportare le modifiche",
             );
             let mut out = assistant::run(
                 &assistant,
@@ -222,24 +223,25 @@ fn run(p: &Paths, spec: Spec) -> Result<Candidate, Fail> {
                     Ok(()) => break (commit, Kind::Change, request.clone(), out.summary),
                     Err(e) if round < FIX_ROUNDS && !spec.cancel.load(Ordering::Relaxed) => {
                         round += 1;
+                        let name = assistant.name();
                         say(&tr!(
-                            en: "The build or the tests failed, so Claude Code is fixing it (try {round})…",
-                            ja: "ビルドかテストが通らないので、Claude Code が直しています（{round} 回目）…",
-                            de: "Build oder Tests sind fehlgeschlagen, Claude Code korrigiert das (Versuch {round})…",
-                            it: "La compilazione o i test non sono riusciti, Claude Code sta correggendo (tentativo {round})…",
+                            en: "The build or the tests failed, so {name} is fixing it (try {round})…",
+                            ja: "ビルドかテストが通らないので、{name} が直しています（{round} 回目）…",
+                            de: "Build oder Tests sind fehlgeschlagen, {name} korrigiert das (Versuch {round})…",
+                            it: "La compilazione o i test non sono riusciti, {name} sta correggendo (tentativo {round})…",
                         ));
                         let couldnt = tr!(
-                            en: "Claude Code couldn't fix it",
-                            ja: "Claude Code が直せませんでした",
-                            de: "Claude Code konnte es nicht korrigieren",
-                            it: "Claude Code non è riuscito a correggere",
+                            en: "{name} couldn't fix it",
+                            ja: "{name} が直せませんでした",
+                            de: "{name} konnte es nicht korrigieren",
+                            it: "{name} non è riuscito a correggere",
                         );
                         let prompt = spec.brief.fix(&format!("{e:#}"));
                         out = assistant::run(
                             &assistant,
                             &p.repo,
                             &prompt,
-                            out.session.as_deref(),
+                            out.session.take(),
                             &assistant_log,
                             limits,
                             &mut ui::progress::log,
@@ -265,17 +267,18 @@ fn run(p: &Paths, spec: Spec) -> Result<Candidate, Fail> {
         }
         Plan::Resolve { merged, conflicts, ours, upstream, requests, notes, title, assistant } => {
             repo.checkout(merged, &p.repo).map_err(fail(cant_read_changes()))?;
+            let name = assistant.name();
             say(&tr!(
-                en: "Claude Code is combining your changes with the official update…",
-                ja: "Claude Code があなたの変更と公式の更新を合わせています…",
-                de: "Claude Code führt deine Änderungen mit dem offiziellen Update zusammen…",
-                it: "Claude Code sta unendo le tue modifiche con l'aggiornamento ufficiale…",
+                en: "{name} is combining your changes with the official update…",
+                ja: "{name} があなたの変更と公式の更新を合わせています…",
+                de: "{name} führt deine Änderungen mit dem offiziellen Update zusammen…",
+                it: "{name} sta unendo le tue modifiche con l'aggiornamento ufficiale…",
             ));
             let couldnt = tr!(
-                en: "Claude Code couldn't combine them",
-                ja: "Claude Code が合わせられませんでした",
-                de: "Claude Code konnte sie nicht zusammenführen",
-                it: "Claude Code non è riuscito a unirle",
+                en: "{name} couldn't combine them",
+                ja: "{name} が合わせられませんでした",
+                de: "{name} konnte sie nicht zusammenführen",
+                it: "{name} non è riuscito a unirle",
             );
             let out = assistant::run(
                 &assistant,
@@ -357,7 +360,10 @@ mod tests {
 
     #[test]
     fn requests_round_trip_through_commit_messages() {
-        let a = Assistant { path: PathBuf::from("/c"), version: "2.0 (Claude Code)".into(), restricted: true };
+        let a = Assistant {
+            version: "2.0 (Claude Code)".into(),
+            backend: assistant::Backend::ClaudeCode { path: PathBuf::from("/c"), restricted: true },
+        };
         let m = change_message("Make the button blue\nand round", "Changed the button.", &a);
         assert!(m.starts_with("Make the button blue\n\nRequest:\n"), "{m}");
         assert_eq!(requests_in(&m), Some("Make the button blue\nand round"));

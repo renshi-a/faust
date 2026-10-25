@@ -10,6 +10,7 @@ mod child;
 mod controller;
 mod devices;
 mod job;
+mod model;
 pub(crate) mod overrides;
 mod paths;
 mod sandbox;

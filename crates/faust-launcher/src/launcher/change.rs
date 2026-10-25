@@ -7,9 +7,10 @@ use std::sync::atomic::AtomicBool;
 
 use serde_json::json;
 
-use super::assistant::{self, Brief};
+use super::assistant::{self, Assistant, Brief, Choice};
 use super::controller::{Controller, cancel_title, short_lines};
 use super::job::{self, Candidate, Outcome, Plan};
+use super::model::{self, Endpoint};
 use super::state::{Kind, Status, Version, now};
 use super::versions::switch_title;
 use super::{devices, log};
@@ -42,20 +43,8 @@ impl Controller {
             );
             return;
         }
-        let Some(assistant) = assistant::find() else {
-            ui::alert(
-                &tr!(en: "Claude Code can't be found", ja: "Claude Code が見つかりません", de: "Claude Code wurde nicht gefunden", it: "Impossibile trovare Claude Code"),
-                &tr!(
-                    en: "Changes are made by Claude Code. Install it, sign in, and then ask again.\nhttps://claude.com/claude-code",
-                    ja: "変更は Claude Code が行います。インストールしてサインインしてから、もう一度頼んでください。\nhttps://claude.com/claude-code",
-                    de: "Änderungen nimmt Claude Code vor. Installiere es, melde dich an und frag dann noch einmal.\nhttps://claude.com/claude-code",
-                    it: "Le modifiche vengono apportate da Claude Code. Installalo, accedi e poi chiedi di nuovo.\nhttps://claude.com/claude-code",
-                ),
-                &["OK"],
-            );
-            return;
-        };
-        if !assistant.restricted {
+        let Some(mut assistant) = self.assistant().or_else(|| self.no_assistant()) else { return };
+        if assistant.too_old() {
             ui::alert(
                 &tr!(en: "Claude Code needs an update", ja: "Claude Code の更新が必要です", de: "Claude Code muss aktualisiert werden", it: "Claude Code va aggiornato"),
                 &assistant::outdated(&assistant.version),
@@ -70,12 +59,13 @@ impl Controller {
                 ui::ask_text(
                     &tr!(en: "What would you like to change?", ja: "どう変えたいですか？", de: "Was möchtest du ändern?", it: "Cosa vuoi cambiare?"),
                     &tr!(
-                        en: "Describe what you'd like {app} to do. Claude Code rewrites {app}'s source and makes a new version.",
-                        ja: "{app} にしてほしいことを書いてください。Claude Code が {app} のソースを書き換えて、新しいバージョンを作ります。",
-                        de: "Beschreib, was {app} tun soll. Claude Code schreibt den Quellcode von {app} um und erstellt eine neue Version.",
-                        it: "Descrivi cosa vuoi che faccia {app}. Claude Code riscrive il codice sorgente di {app} e crea una nuova versione.",
+                        en: "Describe what you'd like {app} to do. The assistant rewrites {app}'s source and makes a new version.",
+                        ja: "{app} にしてほしいことを書いてください。アシスタントが {app} のソースを書き換えて、新しいバージョンを作ります。",
+                        de: "Beschreib, was {app} tun soll. Der Assistent schreibt den Quellcode von {app} um und erstellt eine neue Version.",
+                        it: "Descrivi cosa vuoi che faccia {app}. L'assistente riscrive il codice sorgente di {app} e crea una nuova versione.",
                     ),
-                    &tr!(en: "Next", ja: "次へ", de: "Weiter", it: "Avanti"),
+                    "",
+                    &next_title(),
                     &cancel_title(),
                 )
             })
@@ -87,7 +77,7 @@ impl Controller {
             log(&format!("the app asks for a change: {}", super::controller::short(&request, 80)));
         }
         let hand = self.hand_edit_count();
-        let (who, repo) = (assistant.title(), super::paths::Paths::tilde(&self.p.repo));
+        let repo = super::paths::Paths::tilde(&self.p.repo);
         let hand_note = if hand > 0 {
             tr!(
                 en: "{hand} files were changed by hand. They go into the next version too.\n",
@@ -98,29 +88,52 @@ impl Controller {
         } else {
             String::new()
         };
-        let text = tr!(
-            en: "Request:\n{request}\n\nAssistant: {who}\nWhat it may change: {repo} (only inside it)\nWhat it can do: read, write and search files. It can't run commands or reach the internet.\n{hand_note}\nAfterwards the new version is built and tested, and you're asked again whether to switch to it.",
-            ja: "頼むこと:\n{request}\n\nアシスタント: {who}\n変更してよい場所: {repo}（この中だけ）\nできること: ファイルを読む、書く、探す。コマンドの実行とインターネットへのアクセスはできません。\n{hand_note}\nそのあと新しいバージョンをビルドしてテストし、切り替えるかをもう一度聞きます。",
-            de: "Anfrage:\n{request}\n\nAssistent: {who}\nWas geändert werden darf: {repo} (nur darin)\nWas er tun kann: Dateien lesen, schreiben und durchsuchen. Befehle ausführen oder ins Internet gehen kann er nicht.\n{hand_note}\nDanach wird die neue Version gebaut und getestet, und du wirst noch einmal gefragt, ob du wechseln möchtest.",
-            it: "Richiesta:\n{request}\n\nAssistente: {who}\nCosa può modificare: {repo} (solo al suo interno)\nCosa può fare: leggere, scrivere e cercare file. Non può eseguire comandi né accedere a internet.\n{hand_note}\nPoi la nuova versione viene compilata e testata, e ti verrà chiesto di nuovo se passare a questa versione.",
-        );
-        let title = if from_app {
-            tr!(
-                en: "Ask Claude Code for the change {app} suggested?",
-                ja: "{app} から頼まれた変更を Claude Code に頼みますか？",
-                de: "Claude Code um die von {app} vorgeschlagene Änderung bitten?",
-                it: "Chiedere a Claude Code la modifica suggerita da {app}?",
-            )
-        } else {
-            tr!(en: "Ask Claude Code to make the change?", ja: "Claude Code に変更を頼みますか？", de: "Claude Code um die Änderung bitten?", it: "Chiedere a Claude Code di fare la modifica?")
-        };
-        let ask = tr!(en: "Ask", ja: "頼む", de: "Bitten", it: "Chiedi");
-        let cancel = cancel_title();
-        let id = self.send_confirmation("change", &title, &text, &[("ask", &ask), ("cancel", &cancel)]);
-        let answer = ui::alert_remote(&id, &title, &text, &[&ask, &cancel], &[Some("ask"), Some("cancel")]);
-        self.confirmation_closed(&id);
-        if answer != 0 {
-            return;
+        loop {
+            let (who, name) = (assistant.title(), assistant.name().to_owned());
+            let sent = match &assistant.backend {
+                assistant::Backend::Model(e) => {
+                    let host = e.host();
+                    tr!(
+                        en: "What it reads is sent to {host}.\n",
+                        ja: "読んだ内容は {host} に送られます。\n",
+                        de: "Was er liest, wird an {host} gesendet.\n",
+                        it: "Ciò che legge viene inviato a {host}.\n",
+                    )
+                }
+                assistant::Backend::ClaudeCode { .. } => String::new(),
+            };
+            let text = tr!(
+                en: "Request:\n{request}\n\nAssistant: {who}\nWhat it may change: {repo} (only inside it)\nWhat it can do: read, write and search files. It can't run commands or reach the internet.\n{sent}{hand_note}\nAfterwards the new version is built and tested, and you're asked again whether to switch to it.",
+                ja: "頼むこと:\n{request}\n\nアシスタント: {who}\n変更してよい場所: {repo}（この中だけ）\nできること: ファイルを読む、書く、探す。コマンドの実行とインターネットへのアクセスはできません。\n{sent}{hand_note}\nそのあと新しいバージョンをビルドしてテストし、切り替えるかをもう一度聞きます。",
+                de: "Anfrage:\n{request}\n\nAssistent: {who}\nWas geändert werden darf: {repo} (nur darin)\nWas er tun kann: Dateien lesen, schreiben und durchsuchen. Befehle ausführen oder ins Internet gehen kann er nicht.\n{sent}{hand_note}\nDanach wird die neue Version gebaut und getestet, und du wirst noch einmal gefragt, ob du wechseln möchtest.",
+                it: "Richiesta:\n{request}\n\nAssistente: {who}\nCosa può modificare: {repo} (solo al suo interno)\nCosa può fare: leggere, scrivere e cercare file. Non può eseguire comandi né accedere a internet.\n{sent}{hand_note}\nPoi la nuova versione viene compilata e testata, e ti verrà chiesto di nuovo se passare a questa versione.",
+            );
+            let title = if from_app {
+                tr!(
+                    en: "Ask {name} for the change {app} suggested?",
+                    ja: "{app} から頼まれた変更を {name} に頼みますか？",
+                    de: "{name} um die von {app} vorgeschlagene Änderung bitten?",
+                    it: "Chiedere a {name} la modifica suggerita da {app}?",
+                )
+            } else {
+                tr!(en: "Ask {name} to make the change?", ja: "{name} に変更を頼みますか？", de: "{name} um die Änderung bitten?", it: "Chiedere a {name} di fare la modifica?")
+            };
+            let ask = tr!(en: "Ask", ja: "頼む", de: "Bitten", it: "Chiedi");
+            let other = tr!(en: "Another Assistant…", ja: "ほかのアシスタント…", de: "Anderer Assistent…", it: "Altro assistente…");
+            let cancel = cancel_title();
+            let id = self.send_confirmation("change", &title, &text, &[("ask", &ask), ("cancel", &cancel)]);
+            let answer =
+                ui::alert_remote(&id, &title, &text, &[&ask, &cancel, &other], &[Some("ask"), Some("cancel"), None]);
+            self.confirmation_closed(&id);
+            match answer {
+                0 => break,
+                2 => {
+                    if let Some(a) = self.choose_assistant() {
+                        assistant = a;
+                    }
+                }
+                _ => return,
+            }
         }
         if hand > 0
             && let Ok(repo) = self.repo()
@@ -130,6 +143,161 @@ impl Controller {
         let working =
             tr!(en: "Changing {app}", ja: "{app} を変更しています", de: "{app} wird geändert", it: "Modifica di {app}");
         self.start_job(Plan::Change { request, assistant }, &working);
+    }
+
+    /// The assistant the user chose, or else Claude Code if it is installed.
+    pub(super) fn assistant(&self) -> Option<Assistant> {
+        assistant::chosen(&self.p.assistant)
+    }
+
+    /// There is no assistant yet: offers to choose a model.
+    fn no_assistant(&mut self) -> Option<Assistant> {
+        let choose = tr!(en: "Choose a Model…", ja: "モデルを選ぶ…", de: "Modell wählen…", it: "Scegli un modello…");
+        let answer = ui::alert(
+            &tr!(en: "There is no assistant to make changes", ja: "変更を行うアシスタントがいません", de: "Es gibt keinen Assistenten für Änderungen", it: "Non c'è un assistente per le modifiche"),
+            &tr!(
+                en: "Changes are made by Claude Code, or by a model you choose: one on this Mac (with Ollama or LM Studio, for example) or a hosted one with an OpenAI-compatible API.\n\nTo use Claude Code, install it, sign in, and ask again.\nhttps://claude.com/claude-code",
+                ja: "変更は Claude Code か、あなたが選んだモデルが行います。モデルは、この Mac で動くもの（Ollama や LM Studio など）でも、OpenAI 互換の API を持つホスティングされたものでも使えます。\n\nClaude Code を使うには、インストールしてサインインしてから、もう一度頼んでください。\nhttps://claude.com/claude-code",
+                de: "Änderungen nimmt Claude Code vor oder ein Modell deiner Wahl: eines auf diesem Mac (etwa mit Ollama oder LM Studio) oder ein gehostetes mit OpenAI-kompatibler API.\n\nUm Claude Code zu verwenden, installiere es, melde dich an und frag dann noch einmal.\nhttps://claude.com/claude-code",
+                it: "Le modifiche vengono apportate da Claude Code o da un modello a tua scelta: uno su questo Mac (per esempio con Ollama o LM Studio) o uno ospitato con un'API compatibile con OpenAI.\n\nPer usare Claude Code, installalo, accedi e poi chiedi di nuovo.\nhttps://claude.com/claude-code",
+            ),
+            &[&choose, "OK"],
+        );
+        if answer == 0 { self.choose_model() } else { None }
+    }
+
+    /// Lets the user choose who makes the changes, and keeps the choice. `None` when they
+    /// cancel.
+    fn choose_assistant(&mut self) -> Option<Assistant> {
+        let claude = assistant::find().filter(|a| !a.too_old());
+        let mut items = Vec::new();
+        if let Some(c) = &claude {
+            items.push(format!("Claude Code {}", c.title()));
+        }
+        items.push(tr!(
+            en: "A model you choose (Ollama, LM Studio, OpenAI, …)",
+            ja: "選んだモデル（Ollama、LM Studio、OpenAI など）",
+            de: "Ein Modell deiner Wahl (Ollama, LM Studio, OpenAI, …)",
+            it: "Un modello a tua scelta (Ollama, LM Studio, OpenAI, …)",
+        ));
+        let (button, item) = ui::pick(
+            &tr!(en: "Who should make the changes?", ja: "だれに変更してもらいますか？", de: "Wer soll die Änderungen vornehmen?", it: "Chi deve apportare le modifiche?"),
+            &tr!(
+                en: "Whichever you choose may only read, write and search files in the app's source, and every version it makes is built, tested and offered to you first.",
+                ja: "どれを選んでも、できるのはアプリのソースのファイルを読む、書く、探すことだけです。作ったバージョンはすべて、ビルドとテストを通してから、使うかを聞きます。",
+                de: "Wen du auch wählst, er darf nur Dateien im Quellcode der App lesen, schreiben und durchsuchen, und jede Version wird erst gebaut, getestet und dir angeboten.",
+                it: "Chiunque tu scelga può solo leggere, scrivere e cercare file nel codice sorgente dell'app, e ogni versione viene prima compilata, testata e proposta a te.",
+            ),
+            &items,
+            &[&tr!(en: "Choose", ja: "選ぶ", de: "Wählen", it: "Scegli"), &cancel_title()],
+        );
+        if button != 0 {
+            return None;
+        }
+        match claude {
+            Some(c) if item == 0 => {
+                self.keep_choice(&Choice::ClaudeCode);
+                Some(c)
+            }
+            _ => self.choose_model(),
+        }
+    }
+
+    /// Asks where the model is and which one to use.
+    fn choose_model(&mut self) -> Option<Assistant> {
+        let before = match assistant::load(&self.p.assistant) {
+            Some(Choice::Model(e)) => Some(e),
+            _ => None,
+        };
+        let url = ui::ask_text(
+            &tr!(en: "Where is the model?", ja: "モデルはどこにありますか？", de: "Wo ist das Modell?", it: "Dov'è il modello?"),
+            &tr!(
+                en: "The address of an OpenAI-compatible API, for example:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
+                ja: "OpenAI 互換 API のアドレスです。たとえば:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
+                de: "Die Adresse einer OpenAI-kompatiblen API, zum Beispiel:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
+                it: "L'indirizzo di un'API compatibile con OpenAI, per esempio:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
+            ),
+            before.as_ref().map_or("http://localhost:11434/v1", |e| e.url.as_str()),
+            &next_title(),
+            &cancel_title(),
+        )?;
+        let url = url.trim().trim_end_matches('/').to_owned();
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            ui::alert(
+                &tr!(en: "That isn't an address", ja: "アドレスではありません", de: "Das ist keine Adresse", it: "Non è un indirizzo"),
+                &tr!(en: "It starts with http:// or https://.", ja: "http:// か https:// で始まります。", de: "Sie beginnt mit http:// oder https://.", it: "Inizia con http:// o https://."),
+                &["OK"],
+            );
+            return None;
+        }
+        let file = super::paths::Paths::tilde(&self.p.assistant);
+        let key = ui::ask_text(
+            &tr!(en: "API key", ja: "API キー", de: "API-Schlüssel", it: "Chiave API"),
+            &tr!(
+                en: "Leave it empty for a model on this Mac. It is kept in {file}, which only you can read, and the builds can't.",
+                ja: "この Mac で動くモデルなら空のままにしてください。キーは {file} に保存され、あなただけが読めます。ビルドからは読めません。",
+                de: "Für ein Modell auf diesem Mac leer lassen. Er wird in {file} gespeichert, das nur du lesen kannst, die Builds nicht.",
+                it: "Lasciala vuota per un modello su questo Mac. Viene salvata in {file}, che solo tu puoi leggere, e le compilazioni no.",
+            ),
+            before.as_ref().filter(|e| e.url == url).map_or("", |e| e.key.as_str()),
+            &next_title(),
+            &cancel_title(),
+        )?;
+        let mut e = Endpoint { url, model: String::new(), key: key.trim().to_owned() };
+        let which = tr!(en: "Which model?", ja: "どのモデルにしますか？", de: "Welches Modell?", it: "Quale modello?");
+        let previous = before.as_ref().map_or("", |b| b.model.as_str());
+        e.model = match model::models(&e, &self.p.log("assistant.log")) {
+            Ok(ids) if !ids.is_empty() => {
+                let host = e.host();
+                let (button, item) = ui::pick(
+                    &which,
+                    &tr!(
+                        en: "The models {host} has. Larger ones that are trained for coding and tool calls do much better.",
+                        ja: "{host} にあるモデルです。コーディングとツール呼び出し向けに学習された、大きめのモデルほどうまくいきます。",
+                        de: "Die Modelle auf {host}. Größere, die für Programmierung und Tool-Aufrufe trainiert sind, schneiden viel besser ab.",
+                        it: "I modelli disponibili su {host}. Quelli più grandi, addestrati per il codice e le chiamate a strumenti, vanno molto meglio.",
+                    ),
+                    &ids,
+                    &[&tr!(en: "Choose", ja: "選ぶ", de: "Wählen", it: "Scegli"), &cancel_title()],
+                );
+                if button != 0 {
+                    return None;
+                }
+                ids.get(item)?.clone()
+            }
+            listed => {
+                let why = match listed {
+                    Err(err) => format!("{err:#}"),
+                    Ok(_) => tr!(en: "it lists none", ja: "一覧が空です", de: "sie ist leer", it: "è vuoto"),
+                };
+                ui::ask_text(
+                    &which,
+                    &tr!(
+                        en: "The list of models couldn't be read ({why}). Type the model's name.",
+                        ja: "モデルの一覧を読めませんでした（{why}）。モデルの名前を入力してください。",
+                        de: "Die Liste der Modelle war nicht lesbar ({why}). Gib den Namen des Modells ein.",
+                        it: "Impossibile leggere l'elenco dei modelli ({why}). Scrivi il nome del modello.",
+                    ),
+                    previous,
+                    &next_title(),
+                    &cancel_title(),
+                )?
+                .trim()
+                .to_owned()
+            }
+        };
+        if e.model.is_empty() {
+            return None;
+        }
+        log(&format!("the assistant is now {} at {}", e.model, e.url));
+        self.keep_choice(&Choice::Model(e.clone()));
+        Some(Assistant::model(e))
+    }
+
+    fn keep_choice(&self, choice: &Choice) {
+        if let Err(e) = assistant::save(&self.p.assistant, choice) {
+            log(&format!("couldn't save the assistant: {e}"));
+        }
     }
 
     /// Tells the app about a confirmation, so a trusted device can answer it too.
@@ -168,10 +336,10 @@ impl Controller {
             it: "Consentire a “{name}” di rispondere alle conferme di {app}?",
         );
         let text = tr!(
-            en: "You'll be able to choose on that device whether to ask Claude Code for a change and whether to switch to a new version.\n\nCheck that this fingerprint matches the one the device shows:\n{fp}",
-            ja: "そのデバイスでも、Claude Code に変更を頼むかと、新しいバージョンに切り替えるかを選べるようになります。\n\nデバイスに表示されている指紋と一致するか確認してください:\n{fp}",
-            de: "Du kannst dann auch auf diesem Gerät entscheiden, ob Claude Code um eine Änderung gebeten und ob zu einer neuen Version gewechselt wird.\n\nPrüfe, ob dieser Fingerabdruck mit dem auf dem Gerät übereinstimmt:\n{fp}",
-            it: "Potrai scegliere anche da quel dispositivo se chiedere una modifica a Claude Code e se passare a una nuova versione.\n\nVerifica che questa impronta corrisponda a quella mostrata dal dispositivo:\n{fp}",
+            en: "You'll be able to choose on that device whether to ask the assistant for a change and whether to switch to a new version.\n\nCheck that this fingerprint matches the one the device shows:\n{fp}",
+            ja: "そのデバイスでも、アシスタントに変更を頼むかと、新しいバージョンに切り替えるかを選べるようになります。\n\nデバイスに表示されている指紋と一致するか確認してください:\n{fp}",
+            de: "Du kannst dann auch auf diesem Gerät entscheiden, ob der Assistent um eine Änderung gebeten und ob zu einer neuen Version gewechselt wird.\n\nPrüfe, ob dieser Fingerabdruck mit dem auf dem Gerät übereinstimmt:\n{fp}",
+            it: "Potrai scegliere anche da quel dispositivo se chiedere una modifica all'assistente e se passare a una nuova versione.\n\nVerifica che questa impronta corrisponda a quella mostrata dal dispositivo:\n{fp}",
         );
         let allow = tr!(en: "Allow", ja: "許可", de: "Erlauben", it: "Consenti");
         let deny = tr!(en: "Don't Allow", ja: "許可しない", de: "Nicht erlauben", it: "Non consentire");
@@ -350,4 +518,8 @@ fn device_switch_text(c: &Candidate, gate: &crate::config::Check) -> String {
         it: "Le modifiche complete sono in “Mostra modifiche” sul Mac.",
     ));
     lines.join("\n")
+}
+
+fn next_title() -> String {
+    tr!(en: "Next", ja: "次へ", de: "Weiter", it: "Avanti")
 }

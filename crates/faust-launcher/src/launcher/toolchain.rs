@@ -253,7 +253,11 @@ pub(crate) fn fetch(
 ) -> Result<()> {
     let total = package_count(dir) as f64;
     // The source's build scripts don't run here, but cargo reads the source's configuration.
-    let writable = super::sandbox::Writable { dirs: Vec::new(), cargo_home: p.cargo_home.clone() };
+    let writable = super::sandbox::Writable {
+        dirs: Vec::new(),
+        cargo_home: p.cargo_home.clone(),
+        secret: vec![p.assistant.clone()],
+    };
     let mut cmd = super::sandbox::command(&writable, &p.cargo_home.join("bin/cargo"));
     cmd.args(["fetch", "--locked"])
         .current_dir(dir)

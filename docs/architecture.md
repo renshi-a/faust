@@ -28,6 +28,7 @@ scripts/e2e.sh      the whole loop, without clicking
     toolchain/        rustup and Rust
     logs/             launcher.log, app.log, and per version: <n>-build.log, <n>-assistant.log, <n>.diff
     devices.json      keys of devices the user trusts to answer confirmations
+    assistant.json    the assistant the user chose, if not Claude Code (mode 600: it may hold an API key)
     lock              held while the launcher runs: one launcher per app
   …                   the app's own data, if it keeps any here
 ```
@@ -50,12 +51,12 @@ commit and old versions beyond the newest five are removed. Holding Option at st
 list of versions first.
 
 **A change.** The app sends `change` (or the user picks the menu item the app provides). Faust
-shows the request and asks. On yes, Claude Code runs in the repository with its tools limited
-to reading, writing and searching files. Faust commits the result on `try/<n>`, checks it out
+shows the request and asks. On yes, the assistant runs in the repository with its tools
+limited to reading, writing and searching files (see [the assistant](#the-assistant)). Faust commits the result on `try/<n>`, checks it out
 into `versions/<n>`, and runs the gate: the build, the tests and the self-test, each in the
 sandbox, where it may write only to `versions/<n>`, `target/`, cargo's caches and the
-temporary folders (see the [security model](security.md)). When the gate fails, Claude Code gets the end of the log and two more tries, in the
-same session. A candidate that passes is offered to the user with its diff; on yes, the app is
+temporary folders (see the [security model](security.md)). When the gate fails, the assistant
+gets the end of the log and two more tries, in the same conversation. A candidate that passes is offered to the user with its diff; on yes, the app is
 asked to quit and the candidate starts *on trial*.
 
 **A trial.** A candidate that can't start (it exits early, or shows nothing within the
@@ -67,10 +68,36 @@ start twice in a row is replaced by the previous good one.
 commit's time, or the moment a working tree was packaged). When it is larger than the last one
 imported, the shipped source becomes a new commit on `upstream`. If the user changed nothing,
 the update is checked as it is; otherwise `main` and `upstream` are merged three ways. A clean
-merge is checked like any candidate. A conflicting one is offered to Claude Code, with what the
+merge is checked like any candidate. A conflicting one is offered to the assistant, with what the
 user asked for so far (read from the commit messages) and the update's notes; or the user's
 changes are set aside on `before/<release>`; or the user waits. A newer Rust release is
 installed first, after asking.
+
+## The assistant
+
+Two kinds of assistant can make a change, and the user picks one from the change dialog
+(**Another Assistant…**). Without a choice, Faust uses Claude Code when it is installed.
+
+| | Claude Code | Any other model |
+|---|---|---|
+| Who runs the loop | Claude Code (`claude -p`, `stream-json`) | Faust (`launcher/model.rs`) |
+| How Faust reaches it | the installed executable | an OpenAI-compatible `/chat/completions` API, through `/usr/bin/curl` |
+| Tools | `Read,Edit,Write,Glob,Grep`, in restricted mode | `list_files`, `read_file`, `search`, `write_file`, `edit_file`, carried out by Faust |
+| A second try | `--resume` with the session id | the same messages, continued |
+
+The second column covers models on the user's Mac (Ollama, LM Studio, llama.cpp's server,
+MLX, vLLM) and hosted ones (OpenAI, OpenRouter, and anything else that speaks the same API).
+Faust lists the server's models (`GET /models`) and the user picks one; the address, the model
+and an optional API key are kept in `faust/assistant.json`.
+
+The split follows the one agent gateways such as OpenClaw make between *CLI backends* (a
+local agent that owns its loop) and an *embedded runtime* (the gateway's own loop, talking to
+any provider over HTTP). Faust keeps both deliberately small. It writes each backend's
+contract in the launcher, never in settings or the source: Claude Code's flags, and the
+model's five tools. Other agent CLIs are not run, because none has a mode that confines it to
+file tools the way `--restricted` does, and Faust's promise to the user ("it can't run
+commands") would then depend on the CLI. With its own loop, that promise doesn't depend on the
+model at all: a model can only ask, and Faust decides what a tool call may touch.
 
 ## The repository
 
