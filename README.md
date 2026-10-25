@@ -21,8 +21,9 @@ the users of the apps you ship do the same.
 
 You ship the app as source, wrapped in Faust. A user asks for a change inside the app, and
 how they ask is part of the app, so they can change that too. Claude Code, or any model they
-choose (one on their own Mac included), rewrites their copy, Faust builds and tests it, and they switch only if it passes and they agree. A version
-that can't start is rolled back, and your updates are merged with their changes.
+choose (one on their own Mac included), rewrites their copy, Faust builds and tests it, and
+they switch only if it passes and they agree. A version that can't start is rolled back, and
+your updates are merged with their changes.
 
 Building needs no Xcode, on your Mac or theirs.
 
@@ -93,6 +94,8 @@ faust dev                           # builds it without Xcode and opens it the w
 
 In the window that opens, choose **Happy Day ▸ Request a Change…** and ask for something,
 such as "make the text larger" or "add a button that says hello back". Faust handles the rest.
+To use a model instead of Claude Code, choose **Another Assistant…** in the confirmation, enter
+the server's address (Ollama's is `http://localhost:11434/v1`) and pick a model.
 
 ## What an app adds
 
@@ -166,9 +169,9 @@ has advice on what to put in it.
 
 Faust links with the `rust-lld` that ships with Rust, against a tiny SDK it writes itself, so
 only `faust release` uses Xcode (for `notarytool` and `stapler`). `faust build` also checks
-that an app can be built on a Mac without Xcode: if a crate compiles
-C, it trips a wire, and the build stops and shows what was called. Rebuilds skip the first link
-stage while the code uses no new system functions, so a one-line change rebuilds in about a second.
+that an app can be built on a Mac without Xcode: if a crate compiles C, it trips a wire, and
+the build stops and shows what was called. Rebuilds skip the first link stage while the code
+uses no new system functions, so a one-line change rebuilds in about a second.
 
 ## What keeps users safe
 
@@ -182,7 +185,8 @@ and the app can't change the launcher.
   settings files, including settings files a rewritten source could plant. Any other model
   gets tools that Faust carries out itself: list, read, search, write and edit files in the
   repository, and nothing more. Protected files (`[repair] protect`) are put back if it
-  touches them.
+  touches them. The confirmation says where a model's reads are sent, so the user can tell a
+  model on their Mac from one on a server.
 - **Building is sandboxed.** Build scripts, proc macros, tests and the self-test run under
   `sandbox-exec`, and may write only to the version's own folder, cargo's output and caches, and
   the temporary folders, never to the repository, the state or the other versions.
@@ -237,4 +241,5 @@ inclusion in Faust shall be dual licensed as above, without any additional terms
 Faust builds on [gitoxide](https://github.com/GitoxideLabs/gitoxide) for git without git,
 [objc2](https://github.com/madsmtm/objc2) for AppKit without an SDK, the
 [object](https://github.com/gimli-rs/object) crate for reading Mach-O, and
-[Claude Code](https://claude.com/claude-code), which does the rewriting.
+[Claude Code](https://claude.com/claude-code) and the models users choose, which do the
+rewriting.
