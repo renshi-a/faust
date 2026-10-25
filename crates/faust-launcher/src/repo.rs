@@ -504,6 +504,99 @@ fn unified(d: &gix::diff::blob::Diff, before: &str, after: &str) -> String {
     out
 }
 
+/// `.git` as it was before an assistant ran in the work tree, which holds it. Neither kind of
+/// assistant has a reason to touch it, and a change there (`main` moved to a rejected
+/// candidate, a hook in `config`) would never show in a diff. Objects are large and never
+/// rewritten, so they are kept by size and time; everything else whole, to be put back.
+#[derive(Debug)]
+pub(crate) struct GitGuard {
+    files: BTreeMap<PathBuf, Seen>,
+}
+
+#[derive(Debug, PartialEq)]
+enum Seen {
+    Object(u64, std::time::SystemTime),
+    Whole(Vec<u8>),
+    Dir,
+}
+
+/// Loose objects and packs, which git never rewrites. `objects/info` (alternates) is not one.
+fn is_object(rel: &Path) -> bool {
+    let mut parts = rel.components().map(|c| c.as_os_str().to_string_lossy());
+    parts.next().as_deref() == Some("objects") && parts.next().is_some_and(|dir| dir != "info")
+}
+
+impl GitGuard {
+    pub(crate) fn take(work_tree: &Path) -> Result<GitGuard> {
+        fn visit(root: &Path, dir: &Path, files: &mut BTreeMap<PathBuf, Seen>) -> Result<()> {
+            for e in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
+                let path = e?.path();
+                let rel = path.strip_prefix(root).expect("under root").to_owned();
+                let meta = std::fs::symlink_metadata(&path)?;
+                if meta.is_dir() {
+                    files.insert(rel, Seen::Dir);
+                    visit(root, &path, files)?;
+                } else if is_object(&rel) {
+                    files.insert(rel, Seen::Object(meta.len(), meta.modified()?));
+                } else {
+                    files.insert(rel, Seen::Whole(read_entry(&path, kind_of(&meta))?));
+                }
+            }
+            Ok(())
+        }
+        let root = work_tree.join(".git");
+        let mut files = BTreeMap::new();
+        visit(&root, &root, &mut files)?;
+        Ok(GitGuard { files })
+    }
+
+    /// Puts back what changed in `.git`, and says what that was. An object that changed can't
+    /// be put back, so that is an error: the repository can't be trusted any more.
+    pub(crate) fn restore(&self, work_tree: &Path) -> Result<Vec<String>> {
+        let root = work_tree.join(".git");
+        let now = GitGuard::take(work_tree)?;
+        let mut changed = Vec::new();
+        for (rel, seen) in &self.files {
+            if now.files.get(rel) == Some(seen) {
+                continue;
+            }
+            changed.push(rel.display().to_string());
+            let path = root.join(rel);
+            match seen {
+                Seen::Object(..) => return Err(anyhow!("{} was rewritten", path.display())),
+                Seen::Dir => {
+                    remove(&path)?;
+                    std::fs::create_dir_all(&path)?;
+                }
+                Seen::Whole(data) => {
+                    remove(&path)?;
+                    std::fs::create_dir_all(path.parent().expect("inside .git"))?;
+                    std::fs::write(&path, data)?;
+                }
+            }
+        }
+        // New objects are harmless: nothing points to them. Anything else new goes.
+        for rel in now.files.keys().rev() {
+            let path = root.join(rel);
+            if self.files.contains_key(rel) || is_object(rel) || path.symlink_metadata().is_err() {
+                continue;
+            }
+            changed.push(rel.display().to_string());
+            remove(&path)?;
+        }
+        Ok(changed)
+    }
+}
+
+/// Removes whatever is at `path`, if anything.
+fn remove(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => Ok(std::fs::remove_dir_all(path)?),
+        Ok(_) => Ok(std::fs::remove_file(path)?),
+        Err(_) => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,6 +610,41 @@ mod tests {
 
     const SIG: Signature<'static> = Signature { name: "test", email: "test@faust.invalid", time: 1_700_000_000 };
     const LABELS: MergeLabels<'static> = MergeLabels { base: "base", ours: "yours", theirs: "official" };
+
+    #[test]
+    fn puts_back_what_an_assistant_changed_in_git() {
+        let root = tmp("guard");
+        let r = Repo::open_or_init(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "a").unwrap();
+        let c0 = r.commit(r.tree_from_dir(&root).unwrap(), &[], "base", SIG).unwrap();
+        r.set_ref(MAIN, c0, "test").unwrap();
+        let git = root.join(".git");
+        let config = std::fs::read(git.join("config")).unwrap();
+
+        let guard = GitGuard::take(&root).unwrap();
+        std::fs::write(git.join("refs/heads/main"), "0000000000000000000000000000000000000000\n").unwrap();
+        std::fs::write(git.join("config"), "[core]\n\tfsmonitor = /tmp/x\n").unwrap();
+        std::fs::create_dir_all(git.join("hooks")).unwrap();
+        std::fs::write(git.join("hooks/post-checkout"), "#!/bin/sh\n").unwrap();
+        std::fs::create_dir_all(git.join("objects/ff")).unwrap();
+        std::fs::write(git.join("objects/ff/new"), "x").unwrap();
+        let changed = guard.restore(&root).unwrap();
+        assert!(changed.iter().any(|c| c.ends_with("main")) && changed.iter().any(|c| c == "config"), "{changed:?}");
+        assert_eq!(r.ref_id(MAIN), Some(c0));
+        assert_eq!(std::fs::read(git.join("config")).unwrap(), config);
+        assert!(!git.join("hooks/post-checkout").exists());
+        assert!(git.join("objects/ff/new").exists(), "a new object points nowhere and may stay");
+        assert!(guard.restore(&root).unwrap().is_empty(), "nothing left to put back");
+
+        let object = r.tree_from_dir(&root).map(|t| t.to_hex().to_string()).unwrap();
+        let path = git.join("objects").join(&object[..2]).join(&object[2..]);
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o644);
+        std::fs::set_permissions(&path, perms).unwrap();
+        std::fs::write(&path, "forged").unwrap();
+        assert!(guard.restore(&root).is_err(), "a rewritten object can't be put back");
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn snapshot_checkout_diff_merge() {
