@@ -1,0 +1,27 @@
+[workspace]
+resolver = "3"
+members = ["crates/faust-launcher", "crates/faust-link"]
+# Examples are apps of their own, built by `faust`, each with its own lock file.
+exclude = ["examples"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/renshi-a/faust"
+homepage = "https://github.com/renshi-a/faust"
+authors = ["Renshi Asada"]
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+allow_attributes_without_reason = "warn"
+undocumented_unsafe_blocks = "warn"
+
+[profile.release]
+panic = "abort"

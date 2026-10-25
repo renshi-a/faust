@@ -1,0 +1,16 @@
+# How Faust builds, checks and ships this app: https://github.com/renshi-a/faust
+
+[app]
+name = "{{name}}"
+id = "{{id}}"
+description = "{{name}} is a small app you can change by asking."
+
+[toolchain]
+rust = "{{rust}}"
+
+[check]
+selftest = ["--selftest"]
+
+[repair]
+rules = "FAUST.md"
+protect = ["faust.toml"]

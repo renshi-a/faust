@@ -1,0 +1,18 @@
+[package]
+name = "{{binary}}"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The app is a workspace of its own, wherever its folder ends up.
+[workspace]
+
+[dependencies]
+faust-link = {{faust_link}}
+objc2 = "0.6"
+
+[profile.release]
+panic = "abort"
+# The app is built, and rebuilt after every change, on the user's Mac: a quick rebuild
+# matters more there than the last bit of optimisation.
+incremental = true

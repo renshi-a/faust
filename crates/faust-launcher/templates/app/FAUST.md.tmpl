@@ -1,0 +1,38 @@
+# Rules for changing {{name}}
+
+You are changing {{name}} on the Mac of the person who uses it, because they asked. Faust, the
+launcher around the app, builds, tests and starts what you leave behind, and switches to it
+only if all of that works and the person agrees. You can read, write and search files here;
+you can't run commands.
+
+## What {{name}} is
+
+A macOS app written in Rust. `src/main.rs` opens the window and builds the menus, through
+Objective-C messages to AppKit (loaded at run time, so the build needs no Xcode).
+
+## Do what was asked, and only that
+
+- The request is in the person's own words. Do what it says, as simply as you can.
+- Don't reformat or rename things the request doesn't touch.
+- When you are done, say what you changed in a few plain sentences: they appear in the dialog
+  that asks whether to switch, and in the commit message.
+
+## Keep the app working
+
+- The build has no C compiler and no Xcode: never add a crate that compiles C or C++ (crates
+  that use `cc`, `cmake` or `bindgen`, or `*-sys` crates). Pure Rust only.
+- Prefer the standard library. If you add a crate, add it to `Cargo.toml`; the lock file is
+  updated by the build.
+- Keep the tests passing, and add a test for new behavior when you can. Never delete or skip a
+  test to make the build pass.
+- Keep `--selftest` working: Faust runs it before it uses a new version.
+- Keep the calls to `faust_link`: `ready()` once the window is up, quitting on
+  `Event::Quit`, and the "Request a Change…" and "Choose a Version…" menu items.
+
+## Keep the person's data safe
+
+- Data the app saves must stay readable by the previous version too, because the person can
+  go back at any time. Add fields; don't rename or remove them.
+- Never send anything over the network unless the request asks for it, and then say what is
+  sent and where.
+- Don't change `faust.toml`; Faust puts it back if you do.

@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # The release examples/hello pins (faust.toml), installed under its own name.
+  APP_RUST: 1.96.1
+
+jobs:
+  check:
+    name: fmt, clippy, tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: check-${{ hashFiles('Cargo.lock') }}
+          restore-keys: check-
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  example:
+    name: build examples/hello without Xcode
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install stable "$APP_RUST" --profile minimal
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            examples/hello/target
+          key: example-${{ hashFiles('Cargo.lock', 'examples/hello/Cargo.lock') }}
+          restore-keys: example-
+      - run: cargo build
+      # Tripwires stand in for cc, ld, xcrun and friends: this fails if anything reaches for Xcode.
+      - run: ../../target/debug/faust build
+        working-directory: examples/hello
+      - run: ../../target/debug/faust test
+        working-directory: examples/hello
+      - run: examples/hello/dist/Hello.app/Contents/MacOS/hello --selftest
+      - run: target/debug/faust package --path examples/hello --worktree --out target/package
+
+  e2e:
+    name: the whole loop, with a fake assistant
+    needs: example
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install stable "$APP_RUST" --profile minimal
+      - run: scripts/e2e.sh
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: target/e2e

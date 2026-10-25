@@ -1,0 +1,39 @@
+[package]
+name = "faust-launcher"
+description = "Ship macOS apps your users can repair: a signed launcher that builds, rewrites, tests and rolls back the app on the user's own Mac"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["faust", "self-improving", "repairable", "launcher", "macos"]
+categories = ["development-tools", "command-line-utilities", "os::macos-apis"]
+
+[[bin]]
+name = "faust"
+path = "src/main.rs"
+
+# Every dependency is pure Rust: nothing here reaches for a C compiler.
+[features]
+# Lets tests drive the launcher through environment variables (scripts/e2e.sh).
+# Never in a release: see src/launcher/overrides.rs.
+test-hooks = []
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
+gix = { version = "0.90", default-features = false, features = ["index", "merge", "revision", "sha1"] }
+object = { version = "0.37", default-features = false, features = ["read", "std"] }
+objc2 = "0.6.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = { version = "0.10", default-features = false, features = ["std"] }
+toml = "1"
+toml_edit = "0.25"
+
+[lints]
+workspace = true

@@ -1,0 +1,28 @@
+[package]
+name = "faust-link"
+description = "The app side of Faust: tell the launcher you are up, ask for a change, and quit when asked"
+# Everything is spelled out (no workspace inheritance): apps may carry a copy of this crate
+# in their own source, where there is no workspace to inherit from.
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/renshi-a/faust"
+homepage = "https://github.com/renshi-a/faust"
+authors = ["Renshi Asada"]
+readme = "README.md"
+keywords = ["faust", "self-improving", "launcher", "macos"]
+categories = ["os::macos-apis", "development-tools"]
+
+# No dependencies: linking an app to Faust adds nothing to its build.
+[dependencies]
+
+[lints.rust]
+missing_debug_implementations = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unreachable_pub = "warn"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"

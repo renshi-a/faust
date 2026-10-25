@@ -1,0 +1,16 @@
+# How Faust builds, checks and ships this app: https://github.com/renshi-a/faust
+
+[app]
+name = "Hello"
+id = "dev.faust.hello"
+description = "Hello is a small app you can change by asking."
+
+[toolchain]
+rust = "1.96.1"
+
+[check]
+selftest = ["--selftest"]
+
+[repair]
+rules = "FAUST.md"
+protect = ["faust.toml"]
