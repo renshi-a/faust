@@ -14,11 +14,11 @@ case "$mode" in
   break)
     printf '\nfn broken( {\n' >> src/main.rs
     msg="Added a function." ;;
-  fix-greeting)
+  fix-water)
     /usr/bin/sed -i '' -e '$d' src/main.rs
     /usr/bin/sed -i '' -e '$d' src/main.rs
-    /usr/bin/sed -i '' 's/"Hello! Ask me/"Hello, friend! Ask me/' src/main.rs
-    msg="Removed the broken function and made the greeting friendlier." ;;
+    /usr/bin/sed -i '' 's/(0.20, 0.55, 0.95)/(0.10, 0.70, 0.60)/' src/main.rs
+    msg="Removed the broken function and made the water green." ;;
   crash)
     /usr/bin/sed -i '' 's/^    load_appkit();$/    std::process::exit(3);/' src/main.rs
     msg="Made it start faster." ;;

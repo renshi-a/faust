@@ -7,9 +7,10 @@ you can't run commands.
 
 ## What Hello is
 
-A macOS app written in Rust. `src/main.rs` opens the window and builds the menus, and
+A macOS app written in Rust. `src/main.rs` opens the window and builds the menus,
+`src/water.rs` is the ball of water in the window that ripples as the person types, and
 `src/composer.rs` is the field at the bottom of the window where the person asks for a change.
-Both talk to AppKit through Objective-C messages (loaded at run time, so the build needs no
+They talk to AppKit through Objective-C messages (loaded at run time, so the build needs no
 Xcode).
 
 ## Do what was asked, and only that

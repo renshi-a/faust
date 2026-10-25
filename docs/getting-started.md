@@ -32,6 +32,7 @@ Happy Day/
 ├── faust.toml       who the app is, and how Faust builds and checks it
 ├── FAUST.md         the rules the assistant follows when it changes the app
 ├── src/main.rs      one window, and a menu with "Choose a Version…"
+├── src/water.rs     a ball of water in the window that ripples as the user types
 └── src/composer.rs  the field at the bottom of the window where the user asks for a change
 ```
 
@@ -90,7 +91,7 @@ Click through, and the app opens.
 
 In the field at the bottom of the app's window, write what you want and press Enter, for example:
 
-> Make the greeting say good morning, and show today's date under it.
+> Make the water green, and show today's date above it.
 
 Faust shows the request, which assistant will make it, what it may touch, and what it can do,
 and asks before anything starts. **Another Assistant…**, or the assistant's name under the

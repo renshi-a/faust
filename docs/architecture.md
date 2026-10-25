@@ -119,13 +119,13 @@ on a Mac without the Command Line Tools is only a shim that offers to install th
 A change's commit message keeps the request and the assistant's summary:
 
 ```
-Make the greeting friendlier
+Make the water green
 
 Request:
-Make the greeting friendlier
+Make the water green
 
 Summary:
-Changed the greeting to "Hello, friend!".
+Changed the water's colour to green.
 
 Assistant: 2.1.310 (Claude Code)
 ```

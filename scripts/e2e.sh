@@ -73,11 +73,11 @@ make_release() { # <dir> <release> <from>
 }
 
 # 1 -----------------------------------------------------------------------------
-run_launcher setup-and-change "install|start|text:Make the greeting friendlier|0|0" change "break,fix-greeting"
+run_launcher setup-and-change "install|start|text:Make the water green|0|0" change "break,fix-water"
 [[ "$(state current)" == 2 ]] || fail "current should be #2"
 [[ "$(version_field 1 status)" == good && "$(version_field 2 status)" == good ]] || fail "#1 and #2 should be good"
-/usr/bin/grep -q "^fix-greeting .*--resume fake-session" "$fakelog" || fail "the fix round did not resume the assistant's session"
-file_in "$support/faust/repo" src/main.rs "Hello, friend!"
+/usr/bin/grep -q "^fix-water .*--resume fake-session" "$fakelog" || fail "the fix round did not resume the assistant's session"
+file_in "$support/faust/repo" src/main.rs "(0.10, 0.70, 0.60)"
 [[ "$(git_ rev-parse main)" == "$(version_field 2 commit)" ]] || fail "main should be #2's commit"
 git_ log -1 --format=%B main | /usr/bin/grep -q "^Request:" || fail "the commit message lacks the request"
 
@@ -102,16 +102,16 @@ make_release "$work/res2" $((r0 + 1)) "$res"
 run_launcher update-merges "0|0" "" "" "$work/res2"
 [[ "$(state current)" == 5 && "$(version_field 5 kind)" == update ]] || fail "current should be the update #5"
 file_in "$support/faust/versions/0005" src/main.rs "Hello (updated)"
-file_in "$support/faust/versions/0005" src/main.rs "Hello, friend!"
+file_in "$support/faust/versions/0005" src/main.rs "(0.10, 0.70, 0.60)"
 [[ "$(git_ rev-list --parents -n 1 main | wc -w | tr -d ' ')" == 3 ]] || fail "main should be a merge commit"
 
 # 5 -----------------------------------------------------------------------------
 make_release "$work/res3" $((r0 + 2)) "$work/res2"
-/usr/bin/sed -i '' 's/"Hello! Ask me/"Hello, world! Ask me/' "$work/res3/source/src/main.rs"
+/usr/bin/sed -i '' 's/(0.20, 0.55, 0.95)/(0.90, 0.30, 0.30)/' "$work/res3/source/src/main.rs"
 run_launcher update-conflicts "0|0|0" "" "resolve-ours" "$work/res3"
 [[ "$(state current)" == 6 ]] || fail "current should be the resolved update #6"
 /usr/bin/grep -q "^resolve-ours" "$fakelog" || fail "the assistant was not asked to resolve"
-file_in "$support/faust/versions/0006" src/main.rs "Hello, friend!"
+file_in "$support/faust/versions/0006" src/main.rs "(0.10, 0.70, 0.60)"
 /usr/bin/grep -rq '^<<<<<<< ' "$support/faust/versions/0006/src" && fail "conflict markers left in #6"
 
 # 6 -----------------------------------------------------------------------------
@@ -119,7 +119,7 @@ file_in "$support/faust/versions/0006" src/main.rs "Hello, friend!"
 run_launcher choose-older "0:4" versions "" "$work/res3"
 [[ "$(state current)" == 1 ]] || fail "current should be #1"
 [[ "$(git_ rev-parse main)" == "$(version_field 1 commit)" ]] || fail "main should be #1's commit"
-file_in "$support/faust/repo" src/main.rs '"Hello! Ask me'
+file_in "$support/faust/repo" src/main.rs '(0.20, 0.55, 0.95)'
 
 echo "== git (for people who have it) sees a sound repository"
 git_ fsck --no-progress 2>&1 | grep -v "^dangling" || true

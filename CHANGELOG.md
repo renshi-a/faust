@@ -3,7 +3,12 @@
 All notable changes to Faust are listed here. Faust follows [Semantic Versioning](https://semver.org);
 before 1.0, minor versions may change the configuration and the protocol.
 
-## 0.2.0 (unreleased)
+## Unreleased
+
+- The template's window shows a ball of water that ripples as the user types, instead of a
+  line of text.
+
+## 0.2.0 (2026-10-25)
 
 - Changes can be made by any model with an OpenAI-compatible API, not just Claude Code:
   ChatGPT and Gemini by name with an API key, or a model at an address the user gives (Ollama,
