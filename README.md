@@ -14,7 +14,7 @@ with any AI model.
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 ![macOS 11+ on Apple silicon](https://img.shields.io/badge/macOS-11%2B%20·%20Apple%20silicon-lightgrey.svg)
 
-<img src="docs/images/hello.gif" width="420" alt="The template app's water: glowing drops running over a small dark planet, splashing as someone types">
+<img src="docs/images/hello.gif" width="480" alt="The template app's window: glowing water running over a small dark planet splashes as someone types a request into the field below">
 
 </div>
 
