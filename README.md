@@ -2,9 +2,10 @@
 
 # Faust
 
-**Repairable apps: your users fix them by asking.**
+**Repairable apps: your users can fix them themselves.**
 
-Faust is a launcher that makes a Rust app on macOS repairable.
+Faust is a launcher for Rust apps on macOS. With it, the people who use your app can change it
+with any AI model.
 
 *Wer immer strebend sich bemüht, den können wir erlösen.*<br>
 <sub>Whoever strives, always, we can redeem. Goethe, Faust II</sub>
@@ -15,17 +16,14 @@ Faust is a launcher that makes a Rust app on macOS repairable.
 
 </div>
 
-People used to take apps as they came. Now anyone can describe a change in plain words and
-get the code for it, and many people build small apps for themselves this way. Faust lets
-the users of the apps you ship do the same.
+If an app didn't suit someone, they used to ask its developer and wait. Now anyone can
+describe a change in plain words and have an AI write it, and many people already build small
+apps for themselves this way. Faust brings that to the apps you ship.
 
-You ship the app as source, wrapped in Faust. A user asks for a change inside the app, and
-how they ask is part of the app, so they can change that too. Claude Code, or any model they
-choose (one on their own Mac included), rewrites their copy, Faust builds and tests it, and
-they switch only if it passes and they agree. A version that can't start is rolled back, and
-your updates are merged with their changes.
-
-Building needs no Xcode, on your Mac or theirs.
+A user asks for a change inside the app. The AI model they chose recreates the app on their
+PC, Faust builds and tests it, and they switch only if it passes and they agree. A version that
+can't start is rolled back, your updates are merged with their changes, and nothing needs
+Xcode.
 
 ```
 ┌─ Hello.app ─────────────────────────────────────────────────────────────┐
@@ -54,9 +52,9 @@ Building needs no Xcode, on your Mac or theirs.
 ```mermaid
 flowchart LR
     A[User asks for a change] --> B[Faust confirms it with the user]
-    B --> C[The assistant edits the user's copy of the source]
+    B --> C[The AI edits the user's copy of the source]
     C --> D{Build, tests, self-test}
-    D -- fail --> C2[The assistant fixes it, twice at most] --> D
+    D -- fail --> C2[The AI fixes it, twice at most] --> D
     D -- pass --> E[Faust asks: switch?]
     E -- yes --> F[New version starts]
     F -- can't start --> G[Back to the previous version]
@@ -64,27 +62,23 @@ flowchart LR
 ```
 
 1. **You ship source.** `faust package` makes a `.app` holding the launcher and the app's
-   source. The first time it opens, Faust installs Rust into the app's own folder, puts the
-   source in a git repository and builds the first version.
-2. **Users ask for changes.** They ask through whatever the app offers, such as a menu item or
-   a chat, and the app can suggest a change when it can tell what they want. Faust shows the
-   request and asks before anything happens. The assistant, Claude Code or a model the user
-   chose, may only read, write and search files in the user's copy of the source.
-3. **Every version passes the same checks.** A sandboxed build with tripwires on every C and
-   Xcode tool, the app's tests, and its self-test. Then the user decides, and a trial run
-   decides again.
-4. **Old versions are kept.** Every version and every candidate is a commit. Going back is a
-   menu item. Your updates are three-way merged with what the user changed, and when the merge
-   conflicts, the assistant resolves it or the user's changes are set aside on a branch they can
-   get back.
-
-The [architecture](docs/architecture.md) document walks through each step.
+   source. On first launch, Faust installs Rust into the app's own folder, keeps the source in
+   a git repository and builds the first version.
+2. **Users ask for changes** through whatever the app offers, such as a menu item or a chat,
+   and they can change how they ask, too. Faust shows the request and asks before anything
+   happens. The AI may only read, write and search the user's copy of the source.
+3. **Every version passes the same checks:** a sandboxed build that stops at any C or Xcode
+   tool, the app's tests and its self-test. Then the user decides, and a trial run decides
+   again.
+4. **Old versions are kept.** Every version and candidate is a commit, and going back is a menu
+   item. Your updates are three-way merged with the user's changes. When they conflict, the AI
+   resolves it, or the user's changes are set aside on a branch they can get back.
 
 ## Quick start
 
-You need an Apple silicon Mac, [rustup](https://rustup.rs) and, to try changes,
-[Claude Code](https://claude.com/claude-code) or a model behind an OpenAI-compatible API
-(such as [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) on your Mac).
+You need an Apple silicon Mac, [rustup](https://rustup.rs) and an AI model to try changes:
+[Claude Code](https://claude.com/claude-code), or one behind an OpenAI-compatible API such as
+[Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai).
 
 ```sh
 cargo install --git https://github.com/renshi-a/faust faust-launcher   # the `faust` command
@@ -92,10 +86,9 @@ faust new "Happy Day" && cd "Happy Day"                                # a small
 faust dev                           # builds it without Xcode and opens it the way a user would
 ```
 
-In the window that opens, choose **Happy Day ▸ Request a Change…** and ask for something,
-such as "make the text larger" or "add a button that says hello back". Faust handles the rest.
-To use a model instead of Claude Code, choose **Another Assistant…** in the confirmation, enter
-the server's address (Ollama's is `http://localhost:11434/v1`) and pick a model.
+In the window that opens, choose **Happy Day ▸ Request a Change…** and ask for something, such
+as "make the text larger". To use a model other than Claude Code, choose **Another Assistant…**
+in the confirmation and enter its address (Ollama's is `http://localhost:11434/v1`).
 
 ## What an app adds
 
@@ -105,7 +98,7 @@ A repairable app is an ordinary Rust app with three additions.
 happy-day/
 ├── Cargo.toml       depends on faust-link
 ├── faust.toml       who the app is, and how to build and check it
-├── FAUST.md         the rules the assistant follows when it changes the app
+├── FAUST.md         the rules the AI follows when it changes the app
 └── src/main.rs
 ```
 
@@ -148,13 +141,12 @@ if let Some(link) = faust_link::get() {
 ```
 
 Every call is optional: `get()` returns `None` when the app runs on its own, and an app that
-never calls `ready()` counts as started once it has kept running for a few seconds. The
-messages are plain JSON lines on a socket, [documented](docs/protocol.md) for apps that
-aren't written in Rust.
+never calls `ready()` counts as started after a few seconds. The messages are JSON lines on a
+socket, [documented](docs/protocol.md) for apps not written in Rust.
 
-**`FAUST.md`** holds the rules for the assistant: what the app is, what must keep working, what
-it must not touch. `faust new` writes a first version; [Designing repairable apps](docs/repairable-apps.md)
-has advice on what to put in it.
+**`FAUST.md`** tells the AI what the app is, what must keep working and what it must not touch.
+`faust new` writes a first version, and [Designing repairable apps](docs/repairable-apps.md)
+has advice on the rest.
 
 ## Commands
 
@@ -168,33 +160,29 @@ has advice on what to put in it.
 | `faust release` | Packages HEAD, signs it with your Developer ID, notarizes and staples the app and a `.dmg` |
 
 Faust links with the `rust-lld` that ships with Rust, against a tiny SDK it writes itself, so
-only `faust release` uses Xcode (for `notarytool` and `stapler`). `faust build` also checks
-that an app can be built on a Mac without Xcode: if a crate compiles C, it trips a wire, and
-the build stops and shows what was called. Rebuilds skip the first link stage while the code
-uses no new system functions, so a one-line change rebuilds in about a second.
+only `faust release` uses Xcode (for `notarytool` and `stapler`). If a crate compiles C, the
+build stops and shows what was called. A one-line change rebuilds in about a second.
 
 ## What keeps users safe
 
 The source can be rewritten, so the rules that protect the user live in the signed launcher,
-and the app can't change the launcher.
+which the app can't change.
 
-- **The user approves twice.** Before the assistant starts, with the request in full; and before
+- **The user approves twice:** before the AI starts, with the request in full, and before
   switching, with the changes one click away.
-- **The assistant gets file tools only.** Claude Code runs in its restricted mode with only
-  `Read`, `Edit`, `Write`, `Glob` and `Grep`. It has no shell, web, MCP servers, hooks or
-  settings files, including settings files a rewritten source could plant. Any other model
-  gets tools that Faust carries out itself: list, read, search, write and edit files in the
-  repository, and nothing more. Protected files (`[repair] protect`) are put back if it
-  touches them. The confirmation says where a model's reads are sent, so the user can tell a
-  model on their Mac from one on a server.
+- **The AI gets file tools only.** Claude Code runs in its restricted mode with `Read`, `Edit`,
+  `Write`, `Glob` and `Grep`, and no shell, web, MCP servers, hooks or settings files. Other
+  models get five tools that Faust carries out itself: list, read, search, write and edit files
+  in the repository. Protected files (`[repair] protect`) are put back if touched, and the
+  confirmation says where a model's reads are sent.
 - **Building is sandboxed.** Build scripts, proc macros, tests and the self-test run under
-  `sandbox-exec`, and may write only to the version's own folder, cargo's output and caches, and
-  the temporary folders, never to the repository, the state or the other versions.
+  `sandbox-exec` and can write only to the version's folder, cargo's output and caches, and
+  temporary folders.
 - **Bad versions are dropped.** A version that can't show a window within a minute, or exits
-  early, is dropped, and the previous one comes back.
-- **Remote answers must be signed.** If the app pairs with another device (a phone, say), that
-  device can answer Faust's questions only with an Ed25519 signature, over the question it
-  showed, from a key the user approved in Faust's own dialog.
+  early, is replaced by the previous one.
+- **Remote answers must be signed.** A paired device, such as a phone, can answer Faust's
+  questions only with an Ed25519 signature over the question it showed, from a key the user
+  approved.
 
 [Security model](docs/security.md) covers what this does and doesn't protect against. Please
 report vulnerabilities as described in [SECURITY.md](SECURITY.md).
@@ -206,7 +194,7 @@ report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 | Mac | Apple silicon, macOS 11 or later | Apple silicon, macOS 11 or later |
 | Rust | rustup, with the release `faust.toml` pins | installed by Faust (about 540 MB) |
 | Xcode | only for `faust release` (`notarytool`, `stapler`) | not needed |
-| An assistant | Claude Code, or a model with an OpenAI-compatible API, to try changes | the same, to ask for changes |
+| AI model | Claude Code, or a model with an OpenAI-compatible API | the same |
 | Disk | | about 3 GB free for the toolchain, crates and versions |
 
 ## Documentation
@@ -214,7 +202,7 @@ report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 | | |
 |---|---|
 | [Getting started](docs/getting-started.md) | From `faust new` to a released app, with a change and a rollback on the way |
-| [Designing repairable apps](docs/repairable-apps.md) | Data that survives going back, tests that mean something, rules the assistant can follow |
+| [Designing repairable apps](docs/repairable-apps.md) | Data that survives going back, tests that mean something, rules the AI can follow |
 | [Configuration](docs/configuration.md) | Every key in `faust.toml` |
 | [Protocol](docs/protocol.md) | The messages between Faust and the app |
 | [Architecture](docs/architecture.md) | The launcher's loop, the repository, the Xcode-free build |
@@ -223,8 +211,8 @@ report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 ## Contributing
 
 Bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains
-how to build and test Faust, including the end-to-end test that runs the whole loop on the
-example app without clicking.
+how to build and test Faust, including the end-to-end test that runs the whole loop without
+clicking.
 
 ## License
 
@@ -240,6 +228,5 @@ inclusion in Faust shall be dual licensed as above, without any additional terms
 
 Faust builds on [gitoxide](https://github.com/GitoxideLabs/gitoxide) for git without git,
 [objc2](https://github.com/madsmtm/objc2) for AppKit without an SDK, the
-[object](https://github.com/gimli-rs/object) crate for reading Mach-O, and
-[Claude Code](https://claude.com/claude-code) and the models users choose, which do the
-rewriting.
+[object](https://github.com/gimli-rs/object) crate for reading Mach-O, and the AI models that
+do the rewriting, [Claude Code](https://claude.com/claude-code) among them.
