@@ -17,6 +17,7 @@ use serde_json::Value;
 
 use super::model::{self, Endpoint};
 use crate::proc::{self, Limits, Output};
+use crate::repo::GitGuard;
 
 /// One run may take this long.
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -235,6 +236,24 @@ impl Brief {
 /// Runs the assistant in `cwd` (the repository), continuing `resume` if given. `on_log` gets
 /// what it is doing as it goes (files read and changed, what it says).
 pub(crate) fn run(
+    a: &Assistant,
+    cwd: &Path,
+    prompt: &str,
+    resume: Option<Session>,
+    log: &Path,
+    limits: Limits<'_>,
+    on_log: &mut dyn FnMut(&str),
+) -> Result<Outcome> {
+    let guard = GitGuard::take(cwd)?;
+    let out = run_in(a, cwd, prompt, resume, log, limits, on_log);
+    let changed = guard.restore(cwd).map_err(|e| anyhow!("{} changed the repository's history: {e:#}", a.name()))?;
+    if !changed.is_empty() {
+        super::log(&format!("{} changed .git, put back: {}", a.name(), changed.join(", ")));
+    }
+    out
+}
+
+fn run_in(
     a: &Assistant,
     cwd: &Path,
     prompt: &str,

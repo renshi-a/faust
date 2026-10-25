@@ -334,7 +334,8 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
         match c {
             Component::CurDir => {}
             Component::Normal(part) => {
-                if part == ".git" {
+                // The disk is usually case-insensitive: `.GIT` is the same folder.
+                if part.eq_ignore_ascii_case(".git") {
                     bail!("{} is inside .git, which is off limits", given.display());
                 }
                 out.push(part);
@@ -362,7 +363,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<()> {
     for entry in std::fs::read_dir(dir)?.flatten() {
         let name = entry.file_name();
         let Ok(kind) = entry.file_type() else { continue };
-        if kind.is_dir() && name != ".git" && !(name == "target" && dir == root) {
+        if kind.is_dir() && !name.eq_ignore_ascii_case(".git") && !(name == "target" && dir == root) {
             walk(root, &entry.path(), out)?;
         } else if kind.is_file() {
             out.push(entry.path().strip_prefix(root).unwrap_or(&entry.path()).display().to_string());
@@ -477,7 +478,7 @@ mod tests {
         assert_eq!(inside(&root, "src/../src/main.rs").unwrap(), root.join("src/main.rs"));
         assert_eq!(inside(&root, &root.join("src").display().to_string()).unwrap(), root.join("src"));
         assert_eq!(inside(&root, "").unwrap(), root);
-        for bad in ["../x", "src/../../x", "/etc/passwd", ".git/config", "src/.git/x"] {
+        for bad in ["../x", "src/../../x", "/etc/passwd", ".git/config", ".GIT/config", "src/.Git/x"] {
             assert!(inside(&root, bad).is_err(), "{bad}");
         }
         std::os::unix::fs::symlink("/tmp", root.join("out")).unwrap();

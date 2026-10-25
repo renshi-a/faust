@@ -36,11 +36,16 @@ removed from its environment. A Claude Code too old to have restricted mode isn'
 
 Any other model the user chooses gets no tools of its own: it asks for one of five (list,
 read, search, write and edit files), and Faust carries the call out. Paths are taken relative
-to the repository; a path out of it, one inside `.git`, and any symbolic link on the way are
-refused, and nothing larger than 2 MB is read. No tool runs a command or reaches the network.
+to the repository; a path out of it, one inside `.git` (spelled in any case, since the disk
+usually ignores it), and any symbolic link on the way are refused, and nothing larger than
+2 MB is read. No tool runs a command or reaches the network.
 Faust sends the requests itself, with `/usr/bin/curl`, only to the address the user typed. The
 API key is kept in `faust/assistant.json`, readable only by the user, out of the command line
 and the logs, and the build sandbox may not read it.
+
+Whichever assistant ran, Faust then compares `.git` with how it was before: a moved branch,
+a new hook or a changed `config` is put back, and an object that was rewritten fails the
+change, since history that changed underneath would never show in a diff.
 
 Paths listed in the shipped `[repair] protect` are restored after every run, whichever
 assistant ran, including when it resolves a conflicting update.
