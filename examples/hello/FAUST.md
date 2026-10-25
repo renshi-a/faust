@@ -7,8 +7,10 @@ you can't run commands.
 
 ## What Hello is
 
-A macOS app written in Rust. `src/main.rs` opens the window and builds the menus, through
-Objective-C messages to AppKit (loaded at run time, so the build needs no Xcode).
+A macOS app written in Rust. `src/main.rs` opens the window and builds the menus, and
+`src/composer.rs` is the field at the bottom of the window where the person asks for a change.
+Both talk to AppKit through Objective-C messages (loaded at run time, so the build needs no
+Xcode).
 
 ## Do what was asked, and only that
 
@@ -28,10 +30,10 @@ Objective-C messages to AppKit (loaded at run time, so the build needs no Xcode)
 - Keep `--selftest` working: Faust runs it before it uses a new version.
 - Keep the calls to `faust_link`: `ready()` once the window is up, quitting on
   `Event::Quit`, and the "Choose a Version…" menu item.
-- Keep at least one way for the person to ask for a change through `request_change`. The
-  "Request a Change…" menu item is only where the app starts: a text field, a chat, a button, or
-  the app noticing what the person keeps doing are all fine, and so is removing the menu item
-  when another way replaces it.
+- Keep at least one way for the person to ask for a change through `request_change`. The field
+  at the bottom of the window (`src/composer.rs`) is only where the app starts: a chat, a menu
+  item, a button, or the app noticing what the person keeps doing are all fine, and so is
+  removing the field when another way replaces it.
 
 ## Keep the person's data safe
 

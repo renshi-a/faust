@@ -343,9 +343,13 @@ impl Controller {
                     if let Some(r) = self.run.as_mut() {
                         r.ready.get_or_insert_with(Instant::now);
                     }
+                    self.tell_assistant();
                 }
                 ChildEvent::Change(request) => self.ask_change(request),
                 ChildEvent::Versions => self.pick_version(),
+                ChildEvent::ChooseAssistant => {
+                    self.choose_assistant();
+                }
                 ChildEvent::Uninstall => self.ask_uninstall(),
                 ChildEvent::TrustDevice { name, key } => self.trust_device(&name, &key),
                 ChildEvent::ForgetDevice(key) => {

@@ -76,7 +76,9 @@ installed first, after asking.
 ## The assistant
 
 Two kinds of assistant can make a change, and the user picks one from the change dialog
-(**Another Assistant…**). Without a choice, Faust uses Claude Code when it is installed.
+(**Another Assistant…**) or from the app, which can only open that window (`assistant.choose`).
+ChatGPT and Gemini are offered by name: they are OpenAI-compatible APIs whose address Faust
+knows, so the user gives only a key. Without a choice, Faust uses Claude Code when it is installed.
 
 | | Claude Code | Any other model |
 |---|---|---|

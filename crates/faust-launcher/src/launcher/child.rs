@@ -31,6 +31,8 @@ pub(crate) enum ChildEvent {
     Change(Option<String>),
     /// It opens the list of versions.
     Versions,
+    /// It opens the window for choosing who makes the changes.
+    ChooseAssistant,
     Uninstall,
     /// A device was paired in the app; the user decides here whether it may answer.
     TrustDevice {
@@ -147,6 +149,7 @@ fn handle_message(m: &Value, serial: u64, devices_file: &Path) {
             m.get("request").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned),
         ),
         Some("versions") => ChildEvent::Versions,
+        Some("assistant.choose") => ChildEvent::ChooseAssistant,
         Some("uninstall") => ChildEvent::Uninstall,
         Some("device.trust") => {
             let Some(key) = devices::decode_key(&text("public_key")) else { return };

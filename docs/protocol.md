@@ -27,6 +27,7 @@ know, so either can be newer. Writing to a socket whose other end is gone is not
 | `{"type":"change"}` | Ask for a change: Faust asks the user what to change. |
 | `{"type":"change","request":"…"}` | Ask for this change (the app understood it from the user). Faust shows it and asks before anything happens. |
 | `{"type":"versions"}` | Open the list of versions. |
+| `{"type":"assistant.choose"}` | Open Faust's window for choosing who makes the changes. The choice is made there, never by the app. |
 | `{"type":"uninstall"}` | Uninstall, after asking the user. |
 | `{"type":"device.trust","name":"…","public_key":"…"}` | A device was paired in the app. Faust asks the user whether that device may answer its confirmations. The key is a 32-byte Ed25519 public key in base64url. |
 | `{"type":"device.forget","public_key":"…"}` | The device was unpaired. |
@@ -39,6 +40,7 @@ know, so either can be newer. Writing to a socket whose other end is gone is not
 | `{"type":"quit"}` | Quit soon: Faust is switching versions or uninstalling. After ten seconds Faust stops the app itself. |
 | `{"type":"confirmation","id":"…","kind":"change"\|"switch","title":"…","text":"…","choices":[{"id":"…","label":"…"}]}` | Faust is asking the user something. An app that pairs with other devices may show it there too. |
 | `{"type":"confirmation.closed","id":"…"}` | That confirmation was answered, on the Mac or on a device. |
+| `{"type":"assistant","name":"…"}` | Who makes the next change, such as `Claude Code` or a model's name; empty when there is none yet. Sent after `ready` and whenever the user chooses another, for the app to show. |
 
 ## Starting
 

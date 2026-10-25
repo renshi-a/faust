@@ -11,9 +11,9 @@
 //!     link.ready();
 //! }
 //!
-//! // From a menu item such as "Request a Change…":
+//! // From the field where the user asks for a change:
 //! if let Some(link) = faust_link::get() {
-//!     link.request_change(None);
+//!     link.request_change(Some("make the text larger"));
 //! }
 //!
 //! // In the event loop:
@@ -89,6 +89,11 @@ pub enum Event {
     Confirmation(Confirmation),
     /// The confirmation with this id was answered (on the Mac or on a device).
     ConfirmationClosed(String),
+    /// Who makes the next change, by name, such as `Claude Code` or `qwen3-coder`; empty
+    /// when there is no assistant yet. Sent once the app is ready and whenever the user
+    /// chooses another one, for the app to show. Only Faust's own window chooses it: see
+    /// [`Link::choose_assistant`].
+    Assistant(String),
 }
 
 /// A question Faust is asking the user, such as whether to switch to a new version.
@@ -181,6 +186,7 @@ fn parse_event(line: &str) -> Option<Event> {
                 .collect(),
         })),
         "confirmation.closed" => Some(Event::ConfirmationClosed(field("id"))),
+        "assistant" => Some(Event::Assistant(field("name"))),
         _ => None,
     }
 }
@@ -213,6 +219,12 @@ impl Link {
     /// Opens Faust's list of versions, to go back to an earlier one.
     pub fn choose_version(&self) {
         self.send(&object([("type", "versions".into())]));
+    }
+
+    /// Opens Faust's window for choosing who makes the changes: Claude Code, or a model the
+    /// user picks. Faust tells the app the choice with [`Event::Assistant`].
+    pub fn choose_assistant(&self) {
+        self.send(&object([("type", "assistant.choose".into())]));
     }
 
     /// Asks Faust to uninstall the app (after asking the user).
@@ -278,6 +290,10 @@ mod tests {
         let Some(Event::Confirmation(c)) = parse_event(line) else { panic!("not a confirmation: {line}") };
         assert_eq!((c.id.as_str(), c.kind.as_str(), c.choices.len()), ("c2", "switch", 2));
         assert_eq!(c.choices[1], Choice { id: "cancel".into(), label: "Cancel".into() });
+        assert_eq!(
+            parse_event(r#"{"type":"assistant","name":"Claude Code"}"#),
+            Some(Event::Assistant("Claude Code".into()))
+        );
         assert_eq!(parse_event(r#"{"type":"from-the-future"}"#), None);
         assert_eq!(parse_event("not json"), None);
     }
@@ -290,11 +306,17 @@ mod tests {
         link.ready();
         link.request_change(Some("  make the button blue \n"));
         link.request_change(Some("   "));
+        link.choose_assistant();
         drop(link);
         let lines: Vec<String> = BufReader::new(theirs).lines().map_while(Result::ok).collect();
         assert_eq!(
             lines,
-            [r#"{"type":"ready"}"#, r#"{"type":"change","request":"make the button blue"}"#, r#"{"type":"change"}"#]
+            [
+                r#"{"type":"ready"}"#,
+                r#"{"type":"change","request":"make the button blue"}"#,
+                r#"{"type":"change"}"#,
+                r#"{"type":"assistant.choose"}"#
+            ]
         );
     }
 }
