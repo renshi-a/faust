@@ -20,6 +20,8 @@ use crate::proc;
 
 /// The fd the app finds the socket on.
 const LINK_FD: i32 = 3;
+/// What the user says to the app is cut to this many characters.
+const MAX_SAY: usize = 4000;
 /// How long a write to the app may block before it is given up.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -29,6 +31,11 @@ pub(crate) enum ChildEvent {
     Ready,
     /// It asks for a change: with the user's words, or `None` to ask them.
     Change(Option<String>),
+    /// The user said this to the app, for the assistant to answer as the app.
+    Say {
+        id: String,
+        text: String,
+    },
     /// It opens the list of versions.
     Versions,
     /// It opens the window for choosing who makes the changes.
@@ -163,6 +170,14 @@ fn handle_message(m: &Value, serial: u64, devices_file: &Path) {
         Some("change") => ChildEvent::Change(
             m.get("request").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned),
         ),
+        Some("say") => {
+            let said = text("text");
+            let said = said.trim();
+            if said.is_empty() {
+                return;
+            }
+            ChildEvent::Say { id: text("id").chars().take(64).collect(), text: said.chars().take(MAX_SAY).collect() }
+        }
         Some("versions") => ChildEvent::Versions,
         Some("assistant.choose") => ChildEvent::ChooseAssistant,
         Some("uninstall") => ChildEvent::Uninstall,

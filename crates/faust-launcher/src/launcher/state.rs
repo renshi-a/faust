@@ -55,6 +55,10 @@ pub(crate) struct State {
     /// Where to go back to if the current (trial) version does not start.
     pub(crate) fallback: Option<u32>,
     pub(crate) versions: Vec<Version>,
+    /// The assistants the user let answer what they say to the app ([`Assistant::identity`]).
+    ///
+    /// [`Assistant::identity`]: super::assistant::Assistant::identity
+    pub(crate) talk_allowed: Vec<String>,
 }
 
 pub(crate) fn now() -> i64 {

@@ -61,6 +61,13 @@ its copy becomes `target/`. When the gate fails, the assistant
 gets the end of the log and two more tries, in the same conversation. A candidate that passes is offered to the user with its diff; on yes, the app is
 asked to quit and the candidate starts *on trial*.
 
+**Talking to the app.** The app may pass on what the user says to it (`say`). The first time,
+Faust asks whether the chosen assistant may read it. The assistant then answers as the app,
+reading its source with tools that only read, and Faust sends the answer back (`reply`).
+When the app can't do what was asked yet, the answer ends with `[[change: …]]`; Faust takes
+that line out and asks the user about the change exactly as if the app had sent `change`
+(`launcher/talk.rs`).
+
 **A trial.** A candidate that can't start (it exits early, or shows nothing within the
 timeout) is marked bad, its folder is removed, the work tree goes back to `main`, and the
 previous version starts again, with an alert that says why. A good version that later fails to

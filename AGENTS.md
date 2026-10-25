@@ -10,7 +10,7 @@ build, tests, a self-test and the user's consent. Read [README.md](README.md), t
 - `crates/faust-launcher`: the `faust` command and the launcher (one executable).
   - `src/build/`: the Xcode-free build (tripwires, the two link stages, the bundle).
   - `src/launcher/`: what runs on the user's Mac. `controller.rs` is the loop; `setup`,
-    `change`, `versions`, `update` and `uninstall` add their parts to `Controller`.
+    `change`, `talk`, `versions`, `update` and `uninstall` add their parts to `Controller`.
   - `src/ui/`: AppKit through Objective-C messages, on the main thread.
   - `templates/app/`: what `faust new` writes. `examples/hello` is the same, filled in.
 - `crates/faust-link`: the app's side of the protocol. No dependencies, and no workspace

@@ -10,7 +10,7 @@ Faust starts the app with one end of a socket pair on a file descriptor and thes
 | Variable | Meaning |
 |---|---|
 | `FAUST_LINK_FD` | The descriptor (3). Absent when the app was not started by Faust. |
-| `FAUST_PROTOCOL` | The protocol version the launcher speaks (1). |
+| `FAUST_PROTOCOL` | The protocol version the launcher speaks (2). |
 | `FAUST_VERSION` | The running version's number, as shown to the user (`#12`). |
 | `FAUST_VERSION_TITLE` | What it is: `Official version 1.2.0`, or the change that was asked for. |
 | `FAUST_SOURCE_DIR` | The user's copy of the source (a git repository). |
@@ -26,6 +26,7 @@ know, so either can be newer. Writing to a socket whose other end is gone is not
 | `{"type":"ready"}` | The first window is on screen. Send it once. |
 | `{"type":"change"}` | Ask for a change: Faust asks the user what to change. |
 | `{"type":"change","request":"…"}` | Ask for this change (the app understood it from the user). Faust shows it and asks before anything happens. |
+| `{"type":"say","id":"…","text":"…"}` | The user said this to the app. Faust's assistant answers as the app with `reply`, carrying the same `id`. Since protocol 2; to an older launcher, send `change` with the text instead. |
 | `{"type":"versions"}` | Open the list of versions. |
 | `{"type":"assistant.choose"}` | Open Faust's window for choosing who makes the changes. The choice is made there, never by the app. |
 | `{"type":"uninstall"}` | Uninstall, after asking the user. |
@@ -41,6 +42,7 @@ know, so either can be newer. Writing to a socket whose other end is gone is not
 | `{"type":"confirmation","id":"…","kind":"change"\|"switch","title":"…","text":"…","choices":[{"id":"…","label":"…"}]}` | Faust is asking the user something. An app that pairs with other devices may show it there too. |
 | `{"type":"confirmation.closed","id":"…"}` | That confirmation was answered, on the Mac or on a device. |
 | `{"type":"assistant","name":"…"}` | Who makes the next change, such as `Claude Code` or a model's name; empty when there is none yet. Sent after `ready` and whenever the user chooses another, for the app to show. |
+| `{"type":"reply","id":"…","text":"…","change":"…"}` | The answer to `say`, for the app to show. `change` is there when the app can't do what was asked yet and the assistant suggested a change: Faust is then asking the user whether to make it. `text` is empty when there is nothing to say (the user didn't let the assistant answer, say). |
 
 ## Starting
 
@@ -52,6 +54,16 @@ one that exits before it is good. An app that doesn't use `faust-link` sets
 
 Exiting with status 0 after `ready` means the user quit, even soon after the start: Faust
 quits too, once any job it is running is done. A version still on trial stays on trial.
+
+## Talking to the app
+
+`say` lets the app pass on what the user writes to it, as in a chat. Before the first words go
+to an assistant, Faust asks the user once whether that assistant may read them; the answer is
+kept in `faust/state.json` for each assistant. The assistant then reads the app's source, but
+can't change it, and answers as the app. When the app can't do what was asked yet and changing
+its source would help, it ends its answer with `[[change: …]]`. Faust takes that line out of
+the `reply` and asks the user about the change with the usual `change` confirmation. One `say`
+is answered at a time, and the conversation goes on until the app starts again.
 
 ## Answers from other devices
 

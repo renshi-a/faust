@@ -3,7 +3,7 @@ name = "faust-link"
 description = "The app side of Faust: tell the launcher you are up, ask for a change, and quit when asked"
 # Everything is spelled out (no workspace inheritance): apps may carry a copy of this crate
 # in their own source, where there is no workspace to inherit from.
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"

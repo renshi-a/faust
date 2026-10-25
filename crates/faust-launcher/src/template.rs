@@ -113,7 +113,7 @@ mod tests {
                 "Hello",
                 "hello",
                 "dev.faust.hello",
-                "{ path = \"../../crates/faust-link\", version = \"0.2\" }",
+                "{ path = \"../../crates/faust-link\", version = \"0.3\" }",
             );
             let got = std::fs::read_to_string(example.join(path)).unwrap();
             assert_eq!(got, want, "examples/hello/{path} differs from the template");

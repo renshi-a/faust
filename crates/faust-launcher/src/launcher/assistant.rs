@@ -21,7 +21,11 @@ use crate::repo::GitGuard;
 
 /// One run may take this long.
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// An answer to what the user said may take this long.
+pub(crate) const TALK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const TOOLS: &str = "Read,Edit,Write,Glob,Grep";
+/// Answering what the user said needs only to read the source.
+const READ_TOOLS: &str = "Read,Glob,Grep";
 /// Settings given on the command line, which restricted mode still applies.
 const SETTINGS: &str = r#"{"disableAllHooks":true}"#;
 
@@ -70,6 +74,15 @@ impl Assistant {
     /// Just the version number: "2.1.300".
     pub(crate) fn short_version(&self) -> &str {
         self.version.split_whitespace().next().unwrap_or(&self.version)
+    }
+
+    /// Who answers, for remembering whom the user let read what they say to the app:
+    /// Claude Code, or a model at its address.
+    pub(crate) fn identity(&self) -> String {
+        match &self.backend {
+            Backend::ClaudeCode { .. } => "claude-code".into(),
+            Backend::Model(e) => format!("{} {}", e.url, e.model),
+        }
     }
 
     /// A Claude Code without restricted mode, which Faust doesn't run.
@@ -214,6 +227,32 @@ impl Brief {
         )
     }
 
+    /// What the user said to the app, for the assistant to answer as the app. `first` is
+    /// whether this starts the conversation (later ones continue it).
+    pub(crate) fn talk(&self, text: &str, first: bool) -> String {
+        let (app, rules, lang) = (&self.app, &self.rules, Brief::language());
+        let rules_text = format!(
+            "Answer as {app}, in at most three short sentences of plain {lang}.\n\
+             If they want something {app} can't do yet, and changing its source would make it possible, \
+             say in one sentence what you would change, and end your reply with this line:\n\
+             [[change: the change, as a request to the programmer who will change the source, in {lang}]]\n\
+             They are asked before anything changes, so don't ask them first. \
+             Leave the line out when {app} can already do it, when they are just talking, \
+             or when changing the source wouldn't help."
+        );
+        if first {
+            format!(
+                "You are {app}, a macOS app, and the person who uses it just wrote to it. \
+                 This directory (a git repository) is {app}'s source: read {rules} first, \
+                 and read the source when you need to know what {app} can do. \
+                 You can only read files here; you can't change them or run anything.\n\n\
+                 {rules_text}\n\nWhat they wrote:\n{text}"
+            )
+        } else {
+            format!("They wrote:\n{text}\n\n(As before: {rules_text})")
+        }
+    }
+
     /// After a failed build or test: the end of the log.
     pub(crate) fn fix(&self, failure: &str) -> String {
         let lang = Brief::language();
@@ -316,21 +355,7 @@ fn claude(
     limits: Limits<'_>,
     on_log: &mut dyn FnMut(&str),
 ) -> Result<Outcome> {
-    let mut cmd = Command::new(path);
-    cmd.arg("-p")
-        .args(["--output-format", "stream-json", "--verbose"])
-        .arg("--restricted")
-        .args(["--settings", SETTINGS])
-        .args(["--permission-mode", "acceptEdits"])
-        .args(["--tools", TOOLS])
-        .arg("--strict-mcp-config");
-    if let Some(id) = resume {
-        cmd.args(["--resume", id]);
-    }
-    cmd.current_dir(cwd).env("PATH", search_path());
-    for (k, _) in std::env::vars_os().filter(|(k, _)| k.to_string_lossy().starts_with("FAUST_")) {
-        cmd.env_remove(k);
-    }
+    let cmd = claude_command(path, cwd, TOOLS, resume);
     let out = proc::run(cmd, Some(prompt), log, Limits { cancel: limits.cancel, timeout: Some(TIMEOUT) }, &mut |o| {
         if let Output::Line(l) = o {
             for line in describe(l, cwd) {
@@ -339,6 +364,64 @@ fn claude(
         }
     })?;
     parse(&out)
+}
+
+/// `claude -p` in restricted mode with only `tools`, in `cwd`.
+fn claude_command(path: &Path, cwd: &Path, tools: &str, resume: Option<&str>) -> Command {
+    let mut cmd = Command::new(path);
+    cmd.arg("-p")
+        .args(["--output-format", "stream-json", "--verbose"])
+        .arg("--restricted")
+        .args(["--settings", SETTINGS])
+        .args(["--permission-mode", "acceptEdits"])
+        .args(["--tools", tools])
+        .arg("--strict-mcp-config");
+    if let Some(id) = resume {
+        cmd.args(["--resume", id]);
+    }
+    cmd.current_dir(cwd).env("PATH", search_path());
+    for (k, _) in std::env::vars_os().filter(|(k, _)| k.to_string_lossy().starts_with("FAUST_")) {
+        cmd.env_remove(k);
+    }
+    cmd
+}
+
+/// Lets the assistant answer what the user said (`prompt`, from [`Brief::talk`]), reading
+/// the repository in `cwd` and nothing more. Continues `resume` if given.
+pub(crate) fn talk(a: &Assistant, cwd: &Path, prompt: &str, resume: Option<Session>, log: &Path) -> Result<Outcome> {
+    static NEVER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let limits = Limits { cancel: &NEVER, timeout: Some(TALK_TIMEOUT) };
+    match &a.backend {
+        Backend::ClaudeCode { path, restricted } => {
+            if !restricted {
+                bail!(outdated(&a.version));
+            }
+            let id = match resume {
+                Some(Session::ClaudeCode(id)) => Some(id),
+                _ => None,
+            };
+            let cmd = claude_command(path, cwd, READ_TOOLS, id.as_deref());
+            parse(&proc::run(cmd, Some(prompt), log, limits, &mut |_| {})?)
+        }
+        Backend::Model(e) => {
+            let history = match resume {
+                Some(Session::Model(m)) => m,
+                _ => Vec::new(),
+            };
+            let (summary, messages) = model::talk(e, cwd, prompt, history, log, limits)?;
+            Ok(Outcome { summary, session: Some(Session::Model(messages)) })
+        }
+    }
+}
+
+/// An answer without its `[[change: …]]` line, and the change it suggests, if any.
+pub(crate) fn take_change(answer: &str) -> (String, Option<String>) {
+    let Some(start) = answer.find("[[change:") else { return (answer.trim().to_owned(), None) };
+    let rest = &answer[start + "[[change:".len()..];
+    let (change, after) = rest.split_once("]]").unwrap_or((rest, ""));
+    let text = format!("{}{}", answer[..start].trim_end(), after.trim_end());
+    let change = change.trim();
+    (text.trim().to_owned(), (!change.is_empty()).then(|| change.to_owned()))
 }
 
 /// One line of the assistant's output, as lines for the progress log. Events that say
@@ -505,6 +588,17 @@ mod tests {
     }
 
     #[test]
+    fn takes_the_suggested_change() {
+        assert_eq!(take_change(" Hello! I'm water. "), ("Hello! I'm water.".into(), None));
+        assert_eq!(
+            take_change("I can't sing yet. I'd add a tune.\n[[change: Play a tune when the water is touched]]\n"),
+            ("I can't sing yet. I'd add a tune.".into(), Some("Play a tune when the water is touched".into()))
+        );
+        assert_eq!(take_change("Cut off [[change: half"), ("Cut off".into(), Some("half".into())));
+        assert_eq!(take_change("Empty [[change: ]]"), ("Empty".into(), None));
+    }
+
+    #[test]
     fn prompts_name_the_rules() {
         let b = Brief { app: "Hello".into(), rules: "FAUST.md".into() };
         let p = b.change("make it blue");
@@ -523,5 +617,15 @@ mod tests {
                 && p.contains("(no notes)"),
             "{p}"
         );
+        let t = b.talk("Hello", true);
+        assert!(
+            t.contains("You are Hello")
+                && t.contains("read FAUST.md")
+                && t.contains("[[change:")
+                && t.ends_with("Hello"),
+            "{t}"
+        );
+        let more = b.talk("Make it red", false);
+        assert!(more.starts_with("They wrote:\nMake it red") && more.contains("[[change:"), "{more}");
     }
 }

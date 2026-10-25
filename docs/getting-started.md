@@ -34,7 +34,7 @@ Happy Day/
 ├── src/main.rs      one window, and a menu with "Choose a Version…"
 ├── src/water.rs     water running over a small planet, which ripples as the user types
 ├── src/water.metal  its simulation and lighting, on the GPU
-└── src/composer.rs  the field at the bottom of the window where the user asks for a change
+└── src/composer.rs  the field at the bottom of the window where the user talks to the app
 ```
 
 The template app reaches AppKit through Objective-C messages and loads it at run time, so it
@@ -90,12 +90,15 @@ Click through, and the app opens.
 
 ## 5. Ask for a change
 
-In the field at the bottom of the app's window, write what you want and press Enter, for example:
+In the field at the bottom of the app's window, write to the app and press Enter. The first
+time, Faust asks whether the assistant may read what you write. The assistant answers as the
+app, above the field: say "Hello" and you get an answer, nothing more. Ask for something the app
+can't do yet, for example:
 
 > Make the water green, and show today's date above it.
 
-Faust shows the request, which assistant will make it, what it may touch, and what it can do,
-and asks before anything starts. **Another Assistant…**, or the assistant's name under the
+and the answer says what it would change. Faust shows that change, which assistant will make
+it, what it may touch, and what it can do, and asks before anything starts. **Another Assistant…**, or the assistant's name under the
 field, switches to a different one: Claude Code, ChatGPT or Gemini (with an API key), or a
 model at an address you give, such as `http://localhost:11434/v1` for Ollama. Faust lists that
 server's models and remembers your pick. Then a panel shows the assistant at work:

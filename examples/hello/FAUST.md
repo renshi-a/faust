@@ -12,8 +12,10 @@ A macOS app written in Rust. `src/main.rs` opens the window and builds the menus
 dark planet, runs over it, ripples as the person types and follows the pointer, and is drawn
 as glowing drops on a dark background (simulated and drawn on the GPU with Metal, which compiles the shaders when the app starts;
 `--selftest` compiles and runs them too), and
-`src/composer.rs` is the field at the bottom of the window where the person asks for a change.
-They talk to AppKit through Objective-C messages (loaded at run time, so the build needs no
+`src/composer.rs` is the field at the bottom of the window where the person talks to Hello:
+Faust's assistant answers as Hello, and suggests a change when Hello can't do what they
+want yet.
+All of them talk to AppKit through Objective-C messages (loaded at run time, so the build needs no
 Xcode).
 
 ## Do what was asked, and only that
@@ -34,10 +36,11 @@ Xcode).
 - Keep `--selftest` working: Faust runs it before it uses a new version.
 - Keep the calls to `faust_link`: `ready()` once the window is up, quitting on
   `Event::Quit`, and the "Choose a Version…" menu item.
-- Keep at least one way for the person to ask for a change through `request_change`. The field
-  at the bottom of the window (`src/composer.rs`) is only where the app starts: a chat, a menu
-  item, a button, or the app noticing what the person keeps doing are all fine, and so is
-  removing the field when another way replaces it.
+- Keep at least one way for the person to ask for a change: talking to the app through `say`,
+  or asking through `request_change`. The field at the bottom of the window
+  (`src/composer.rs`) is only where the app starts: a chat, a menu item, a button, or the app
+  noticing what the person keeps doing are all fine, and so is removing the field when another
+  way replaces it.
 
 ## Keep the person's data safe
 

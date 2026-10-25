@@ -131,9 +131,10 @@ if let Some(link) = faust_link::get() {
     link.ready();
 }
 
-// From the field where the user asks for a change:
+// From the field where the user talks to the app. The assistant answers as the app, and
+// suggests a change only when the app can't do what was asked yet:
 if let Some(link) = faust_link::get() {
-    link.request_change(Some("make the text larger"));
+    link.say("make the text larger");
 }
 
 // In the event loop:

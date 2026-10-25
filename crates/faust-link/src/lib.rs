@@ -11,9 +11,9 @@
 //!     link.ready();
 //! }
 //!
-//! // From the field where the user asks for a change:
+//! // From the field where the user talks to the app:
 //! if let Some(link) = faust_link::get() {
-//!     link.request_change(Some("make the text larger"));
+//!     link.say("make the text larger");
 //! }
 //!
 //! // In the event loop:
@@ -37,6 +37,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::fd::FromRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Mutex, OnceLock};
 
@@ -46,7 +47,7 @@ use json::{Value, object};
 pub const FD_VAR: &str = "FAUST_LINK_FD";
 
 /// The version of the protocol this crate speaks.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 
 /// What Faust tells the app about the version that is running.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -94,6 +95,22 @@ pub enum Event {
     /// chooses another one, for the app to show. Only Faust's own window chooses it: see
     /// [`Link::choose_assistant`].
     Assistant(String),
+    /// The answer to something the user said through [`Link::say`].
+    Reply(Reply),
+}
+
+/// Faust's answer, as the app, to something the user said.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Reply {
+    /// The id [`Link::say`] returned.
+    pub id: String,
+    /// What to show, in the user's language. Empty when there is nothing to say (the user
+    /// didn't let the assistant answer, say).
+    pub text: String,
+    /// The change the assistant suggested because the app can't do this yet. Faust is
+    /// asking the user whether to make it.
+    pub change: Option<String>,
 }
 
 /// A question Faust is asking the user, such as whether to switch to a new version.
@@ -187,6 +204,11 @@ fn parse_event(line: &str) -> Option<Event> {
         })),
         "confirmation.closed" => Some(Event::ConfirmationClosed(field("id"))),
         "assistant" => Some(Event::Assistant(field("name"))),
+        "reply" => Some(Event::Reply(Reply {
+            id: field("id"),
+            text: field("text"),
+            change: v.get("change").as_str().map(str::to_owned).filter(|c| !c.is_empty()),
+        })),
         _ => None,
     }
 }
@@ -214,6 +236,28 @@ impl Link {
             fields.push(("request".to_owned(), text.into()));
         }
         self.send(&Value::Object(fields));
+    }
+
+    /// Passes on what the user said to the app. Faust's assistant answers as the app with
+    /// [`Event::Reply`], carrying the id this returns, and when the app can't do what was
+    /// asked yet, it suggests a change, which Faust asks the user about. The assistant only
+    /// reads the source to answer; nothing changes until the user confirms.
+    ///
+    /// A launcher older than protocol 2 can't answer: there the words become a change
+    /// request, as with [`Link::request_change`], and this returns `None`.
+    pub fn say(&self, text: &str) -> Option<String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return None;
+        }
+        if self.info.protocol < 2 {
+            self.request_change(Some(text));
+            return None;
+        }
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let id = format!("say-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+        self.send(&object([("type", "say".into()), ("id", id.as_str().into()), ("text", text.into())]));
+        Some(id)
     }
 
     /// Opens Faust's list of versions, to go back to an earlier one.
@@ -294,6 +338,18 @@ mod tests {
             parse_event(r#"{"type":"assistant","name":"Claude Code"}"#),
             Some(Event::Assistant("Claude Code".into()))
         );
+        assert_eq!(
+            parse_event(r#"{"type":"reply","id":"say-1","text":"I can't yet.","change":"Make the water red"}"#),
+            Some(Event::Reply(Reply {
+                id: "say-1".into(),
+                text: "I can't yet.".into(),
+                change: Some("Make the water red".into())
+            }))
+        );
+        assert_eq!(
+            parse_event(r#"{"type":"reply","id":"say-2","text":"Hello!"}"#),
+            Some(Event::Reply(Reply { id: "say-2".into(), text: "Hello!".into(), change: None }))
+        );
         assert_eq!(parse_event(r#"{"type":"from-the-future"}"#), None);
         assert_eq!(parse_event("not json"), None);
     }
@@ -318,5 +374,26 @@ mod tests {
                 r#"{"type":"assistant.choose"}"#
             ]
         );
+    }
+
+    #[test]
+    fn says_what_the_user_wrote() {
+        let talk = |protocol: u32| {
+            let (ours, theirs) = UnixStream::pair().expect("socket pair");
+            let (_tx, rx) = channel();
+            let info = Info { protocol, ..Info::default() };
+            let link = Link { writer: Mutex::new(ours), events: Mutex::new(rx), info };
+            let ids = [link.say(" Hello \n"), link.say("  ")];
+            drop(link);
+            (ids, BufReader::new(theirs).lines().map_while(Result::ok).collect::<Vec<String>>())
+        };
+        let ([id, none], lines) = talk(2);
+        let id = id.expect("an id");
+        assert_eq!(none, None);
+        assert_eq!(lines, [format!(r#"{{"type":"say","id":"{id}","text":"Hello"}}"#)]);
+        // An older launcher gets a change request, as before.
+        let ([id, _], lines) = talk(1);
+        assert_eq!(id, None);
+        assert_eq!(lines, [r#"{"type":"change","request":"Hello"}"#]);
     }
 }

@@ -162,7 +162,7 @@ impl Controller {
     }
 
     /// There is no assistant yet: offers to choose a model.
-    fn no_assistant(&mut self) -> Option<Assistant> {
+    pub(super) fn no_assistant(&mut self) -> Option<Assistant> {
         let choose = tr!(en: "Choose a Model…", ja: "モデルを選ぶ…", de: "Modell wählen…", it: "Scegli un modello…");
         let answer = ui::alert(
             &tr!(en: "No assistant yet", ja: "アシスタントがまだいません", de: "Noch kein Assistent", it: "Ancora nessun assistente"),

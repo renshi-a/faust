@@ -32,6 +32,11 @@ const MAX_FILE: u64 = 2 << 20;
 
 const SYSTEM: &str = "You are a careful programmer. You change files only through the tools you are given. \
      Paths are relative to the root of the repository. Read a file before you edit it.";
+/// When the model answers what the user said: it may only look.
+const TALK_SYSTEM: &str = "You answer as the app whose source is in this repository. You can read and search \
+     its files through the tools you are given, but not change them. Paths are relative to the root of the repository.";
+/// The tools that only read.
+const READ_TOOLS: [&str; 3] = ["list_files", "read_file", "search"];
 
 /// Where the model is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,23 +135,41 @@ pub(crate) fn run(
         let left = deadline.saturating_duration_since(Instant::now());
         request(e, "chat/completions", Some(body), log, Limits { cancel: limits.cancel, timeout: Some(left) })
     };
-    converse(&mut post, model, cwd, prompt, history, on_log)
+    converse(&mut post, model, cwd, prompt, history, &tools(), on_log)
 }
 
-/// The conversation, with `post` sending each request.
+/// Lets the model answer what the user said, with only the tools that read. Returns its
+/// answer and the conversation, to continue it with what they say next.
+pub(crate) fn talk(
+    e: &Endpoint,
+    cwd: &Path,
+    prompt: &str,
+    mut history: Vec<Value>,
+    log: &Path,
+    limits: Limits<'_>,
+) -> Result<(String, Vec<Value>)> {
+    if history.is_empty() {
+        history.push(json!({"role": "system", "content": TALK_SYSTEM}));
+    }
+    let mut post = |body: &Value| request(e, "chat/completions", Some(body), log, limits);
+    converse(&mut post, &e.model, cwd, prompt, history, &read_tools(), &mut |_| {})
+}
+
+/// The conversation, with `post` sending each request. Only the `tools` offered can be called.
 fn converse(
     post: &mut dyn FnMut(&Value) -> Result<Value>,
     model: &str,
     cwd: &Path,
     prompt: &str,
     mut messages: Vec<Value>,
+    tools: &Value,
     on_log: &mut dyn FnMut(&str),
 ) -> Result<(String, Vec<Value>)> {
     if messages.is_empty() {
         messages.push(json!({"role": "system", "content": SYSTEM}));
     }
     messages.push(json!({"role": "user", "content": prompt}));
-    let tools = tools();
+    let offered = |name: &str| tools.as_array().into_iter().flatten().any(|t| t["function"]["name"] == name);
     for _ in 0..MAX_STEPS {
         let answer = post(&json!({"model": model, "messages": messages, "tools": tools}))?;
         let message = &answer["choices"][0]["message"];
@@ -182,7 +205,8 @@ fn converse(
                 other => other.clone(),
             };
             on_log(&describe(name, &args));
-            let result = tool(cwd, name, &args).unwrap_or_else(|e| {
+            let result = if offered(name) { tool(cwd, name, &args) } else { Err(anyhow!("there is no tool {name}")) };
+            let result = result.unwrap_or_else(|e| {
                 let first = super::assistant::short(&format!("{e:#}"), 160);
                 on_log(&tr!(en: "  Didn't work: {first}", ja: "  うまくいきませんでした: {first}", de: "  Hat nicht geklappt: {first}", it: "  Non è riuscito: {first}"));
                 format!("Error: {e:#}")
@@ -271,6 +295,19 @@ fn tools() -> Value {
             &["path", "old_text", "new_text"],
         ),
     ])
+}
+
+/// The tools that only read files.
+fn read_tools() -> Value {
+    Value::Array(
+        tools()
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|t| READ_TOOLS.iter().any(|n| t["function"]["name"] == *n))
+            .cloned()
+            .collect(),
+    )
 }
 
 /// Carries out one tool call in `root`. The error goes back to the model.
@@ -580,8 +617,10 @@ mod tests {
         };
         let mut lines = Vec::new();
         let (summary, history) =
-            converse(&mut post, "m", &root, "make it friendlier", Vec::new(), &mut |l| lines.push(l.to_owned()))
-                .unwrap();
+            converse(&mut post, "m", &root, "make it friendlier", Vec::new(), &tools(), &mut |l| {
+                lines.push(l.to_owned())
+            })
+            .unwrap();
         assert_eq!(summary, "Made the greeting friendlier.");
         assert!(std::fs::read_to_string(root.join("src/main.rs")).unwrap().contains("Hello, friend!"));
         assert_eq!(lines, ["Looking first", "Edit src/main.rs", "Done with the changes"]);
@@ -590,6 +629,30 @@ mod tests {
         assert_eq!(history[3]["tool_call_id"], "c1");
         assert_eq!(sent[1]["messages"].as_array().unwrap().len(), 4);
         assert_eq!(sent[0]["tools"].as_array().unwrap().len(), 5);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn talking_only_reads() {
+        let root = repo();
+        let mut answers = vec![
+            json!({"choices": [{"message": {"content": "", "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "write_file",
+                 "arguments": "{\"path\":\"src/main.rs\",\"content\":\"gone\"}"}}]}}]}),
+            json!({"choices": [{"message": {"content": "Hello!"}}]}),
+        ]
+        .into_iter();
+        let mut sent = Vec::new();
+        let mut post = |body: &Value| {
+            sent.push(body.clone());
+            Ok(answers.next().unwrap())
+        };
+        let history = vec![json!({"role": "system", "content": TALK_SYSTEM})];
+        let (answer, history) = converse(&mut post, "m", &root, "Hello", history, &read_tools(), &mut |_| {}).unwrap();
+        assert_eq!(answer, "Hello!");
+        assert!(std::fs::read_to_string(root.join("src/main.rs")).unwrap().contains("Hello!"), "nothing was written");
+        assert_eq!(history[3]["content"], "Error: there is no tool write_file");
+        assert_eq!(sent[0]["tools"].as_array().unwrap().len(), 3);
         let _ = std::fs::remove_dir_all(root);
     }
 
