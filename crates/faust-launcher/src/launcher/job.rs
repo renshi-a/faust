@@ -214,8 +214,7 @@ fn run(p: &Paths, spec: Spec) -> Result<Candidate, Fail> {
             .map_err(fail(couldnt))?;
             let mut round = 0;
             loop {
-                restore_protected(&repo, main_tree, p, &spec.protect).map_err(fail(cant_read_changes()))?;
-                let tree = repo.tree_from_dir(&p.repo).map_err(fail(cant_read_changes()))?;
+                let tree = protected_tree(&repo, main_tree, p, &spec.protect).map_err(fail(cant_read_changes()))?;
                 if tree == main_tree {
                     let title = tr!(en: "The source didn't change", ja: "ソースは変わりませんでした", de: "Der Quellcode hat sich nicht geändert", it: "Il codice sorgente non è cambiato");
                     return Err(Fail { title, detail: out.summary });
@@ -296,8 +295,7 @@ fn run(p: &Paths, spec: Spec) -> Result<Candidate, Fail> {
             )
             .map_err(fail(couldnt))?;
             let official = repo.tree_of(upstream).map_err(fail(cant_read_changes()))?;
-            restore_protected(&repo, official, p, &spec.protect).map_err(fail(cant_read_changes()))?;
-            let tree = repo.tree_from_dir(&p.repo).map_err(fail(cant_read_changes()))?;
+            let tree = protected_tree(&repo, official, p, &spec.protect).map_err(fail(cant_read_changes()))?;
             for c in &conflicts {
                 let text = repo.text_at(tree, c).map_err(fail(cant_read_changes()))?.unwrap_or_default();
                 if text.contains("<<<<<<< ") {
@@ -334,12 +332,14 @@ fn run(p: &Paths, spec: Spec) -> Result<Candidate, Fail> {
     Ok(Candidate { id, commit, kind, title, summary, changes, diff, rust: spec.rust })
 }
 
-/// Puts the protected paths in the work tree back as they are in `reference`.
-fn restore_protected(repo: &Repo, reference: ObjectId, p: &Paths, protect: &[String]) -> anyhow::Result<()> {
-    if protect.is_empty() {
-        return Ok(());
-    }
+/// The work tree as a tree, with the protected paths as they are in `reference`, and put back
+/// in the work tree too. The work tree's `.gitignore` decides what else is in the tree, so a
+/// protected path is taken from `reference` even when it is ignored there.
+fn protected_tree(repo: &Repo, reference: ObjectId, p: &Paths, protect: &[String]) -> anyhow::Result<ObjectId> {
     let tree = repo.tree_from_dir(&p.repo)?;
+    if protect.is_empty() {
+        return Ok(tree);
+    }
     let (changes, _) = repo.diff(reference, tree)?;
     let before = repo.files(reference)?;
     for change in changes.iter().filter(|c| crate::config::is_protected(protect, &c.path)) {
@@ -356,7 +356,7 @@ fn restore_protected(repo: &Repo, reference: ObjectId, p: &Paths, protect: &[Str
         }
         ui::progress::log(&format!("== {} is protected: put back as it was", change.path));
     }
-    Ok(())
+    repo.with_files_from(repo.tree_from_dir(&p.repo)?, reference, |path| crate::config::is_protected(protect, path))
 }
 
 #[cfg(test)]
