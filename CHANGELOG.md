@@ -5,7 +5,7 @@ before 1.0, minor versions may change the configuration and the protocol.
 
 ## 0.1.0 (unreleased)
 
-The first release, split out of the launcher of the VisualClaw desk robot app.
+The first release.
 
 - `faust new`, `build`, `test`, `dev`, `package` and `release`.
 - The launcher: setup with its own Rust, changes by Claude Code with two confirmations, a
