@@ -2,7 +2,9 @@
 //
 // Simulation: the material point method (MLS-MPM) on a 64³ grid. Each step, the drops hand
 // their mass and momentum to the grid (p2g_*), the grid moves them on (grid_update), and the
-// drops take their new velocity and its gradient back (g2p).
+// drops take their new velocity and its gradient back (g2p). At the centre of the grid is a
+// solid ball nobody sees; the water is pulled toward it and runs over it like a sea over a
+// small planet.
 //
 // Rendering, in screen space: the drops are drawn as little spheres into a depth texture and a
 // thickness texture, the depth is smoothed into one surface (smooth), and the surface is lit
@@ -26,14 +28,36 @@ struct Cell {
 };
 
 struct Sim {
-    float4 centre;  // xyz: the ball's centre; w: the pull toward it
+    float4 centre;  // xyz: the planet's centre; w: the pull toward it
     float4 impulse; // xyz: where a ripple starts; w: how hard
     float4 fluid;   // x: time step, y: rest density, z: stiffness, w: viscosity
-    float4 misc;    // x: fixed-point scale, y: outward burst, z: ripple size
+    float4 misc;    // x: fixed-point scale, y: outward burst, z: ripple size, w: the planet's radius
     float4 swirl;   // xyz: the axis the water turns about, w: how fast (radians per time)
     float4 tide;    // xyz: the axis the water is drawn out along, w: how hard
+    float4 mouse;   // xy: the pointer, as a fraction of the view; z: its reach in cells; w: on
+    float4 drag;    // xyz: the pointer's velocity in the grid, in cells per time
     uint4 size;     // x: drops, y: grid side
 };
+
+struct View {
+    float4x4 view;
+    float4x4 proj;
+    float4x4 inv_view;
+    float4x4 inv_proj;
+    float4 screen; // width, height, 1 / width, 1 / height (pixels)
+    float4 drop;   // x: drawn radius, y: grid-to-world scale, z: grid centre, w: smoothing radius
+    float4 sun;    // xyz: toward the light
+    float4 eye;    // xyz: the camera
+    float4 water;  // rgb: the water's colour, w: thickness scale
+};
+
+// A point in view space, from where it is on screen (0 to 1, y down) and how far away.
+static float3 view_pos(float2 uv, float d, constant View &u) {
+    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    float4 r = u.inv_proj * float4(ndc, 1.0, 1.0);
+    float3 ray = r.xyz / r.w;
+    return ray * (d / -ray.z);
+}
 
 static uint cell_at(int3 c, int side) {
     return uint((c.z * side + c.y) * side + c.x);
@@ -110,7 +134,7 @@ kernel void p2g_stress(device const Particle *p [[buffer(0)]],
     }
     float dt = s.fluid.x;
     float volume = 1.0 / max(density, 1e-3);
-    float pressure = clamp(s.fluid.z * (pow(density / s.fluid.y, 4.0) - 1.0), -0.5, 200.0);
+    float pressure = clamp(s.fluid.z * (pow(density / s.fluid.y, 5.0) - 1.0), 0.0, 200.0);
     float3x3 strain = q.c + transpose(q.c);
     float3x3 stress = float3x3(-pressure) + s.fluid.w * strain;
     float3x3 term = -volume * 4.0 * dt * stress;
@@ -127,10 +151,13 @@ kernel void p2g_stress(device const Particle *p [[buffer(0)]],
     }
 }
 
-// Velocities from momentum, the pull toward the centre, ripples, and the walls of the grid.
+// Velocities from momentum, then everything that moves the water besides itself: the planet's
+// pull and its surface, the tide and the turn, ripples, the pointer, and the grid's walls.
 kernel void grid_update(device Cell *cells [[buffer(0)]],
                         device float4 *velocity [[buffer(1)]],
                         constant Sim &s [[buffer(2)]],
+                        constant View &u [[buffer(3)]],
+                        texture2d<float, access::read> depth [[texture(0)]],
                         uint id [[thread_position_in_grid]]) {
     int side = int(s.size.y);
     if (id >= uint(side * side * side)) return;
@@ -149,20 +176,38 @@ kernel void grid_update(device Cell *cells [[buffer(0)]],
     float3 out = pos - s.centre.xyz;
     float r = length(out);
     float3 outward = r > 1e-4 ? out / r : float3(0.0, 1.0, 0.0);
-    // Like a small planet: the pull grows from nothing at the centre.
-    v -= outward * s.centre.w * min(r / 6.0, 1.0) * dt;
+
+    v -= outward * s.centre.w * dt;
+    v += s.tide.w * (3.0 * dot(out, s.tide.xyz) * s.tide.xyz - out) * dt;
+    // The water is eased toward a slow turn, which also keeps it from spinning up.
+    v += (cross(s.swirl.xyz, out) * s.swirl.w - v) * 0.01 * dt;
     if (s.impulse.w > 0.0) {
         float3 d = pos - s.impulse.xyz;
         float size = s.misc.z;
         v += outward * s.impulse.w * exp(-dot(d, d) / (size * size)) * dt;
     }
-    v += outward * s.misc.y * min(r / 6.0, 1.0) * dt;
-    // A tide, as from a moon circling the ball: it draws the water out along one axis and
-    // squeezes it across, and as the axis turns the ball keeps changing shape where it is.
-    v += s.tide.w * (3.0 * dot(out, s.tide.xyz) * s.tide.xyz - out) * dt;
-    // A slow turn about an axis that wanders, so the water never quite settles: the water is
-    // eased toward turning at that rate, which also keeps it from speeding up without end.
-    v += (cross(s.swirl.xyz, out) * s.swirl.w - v) * 0.02 * dt;
+    v += outward * s.misc.y * dt;
+
+    // The pointer: where it is over the water, read from last frame's depth, and the water
+    // near there is drawn along with it.
+    if (s.mouse.w > 0.0) {
+        uint2 px = uint2(clamp(s.mouse.xy, 0.0, 0.999) * float2(depth.get_width(), depth.get_height()));
+        float d = depth.read(px).r;
+        if (d > 0.0) {
+            float3 world = (u.inv_view * float4(view_pos(s.mouse.xy, d, u), 1.0)).xyz;
+            float3 at = world / u.drop.y + u.drop.z;
+            float3 to = pos - at;
+            float reach = s.mouse.z;
+            float near = saturate(1.0 - dot(to, to) / (reach * reach));
+            v = mix(v, v + s.drag.xyz, near * 0.3);
+        }
+    }
+
+    // The planet's surface: water slides over it but doesn't go in.
+    if (r < s.misc.w + 1.0) {
+        float into = dot(v, outward);
+        if (into < 0.0) v -= outward * into;
+    }
     // The grid's walls: nothing leaves through them.
     if (c.x < 2 && v.x < 0.0) v.x = 0.0;
     if (c.y < 2 && v.y < 0.0) v.y = 0.0;
@@ -196,24 +241,17 @@ kernel void g2p(device Particle *p [[buffer(0)]],
     }
     q.v = v;
     q.c = b * 4.0;
-    q.x = clamp(q.x + v * s.fluid.x, float3(2.0), float3(float(side) - 3.0));
+    float3 x = clamp(q.x + v * s.fluid.x, float3(2.0), float3(float(side) - 3.0));
+    // Nothing ends up inside the planet.
+    float3 out = x - s.centre.xyz;
+    float r = length(out);
+    if (r < s.misc.w && r > 1e-4) x = s.centre.xyz + out / r * s.misc.w;
+    q.x = x;
     p[id] = q;
 }
 
 // ---------------------------------------------------------------------------------------------
 // Rendering
-
-struct View {
-    float4x4 view;
-    float4x4 proj;
-    float4x4 inv_view;
-    float4x4 inv_proj;
-    float4 screen; // width, height, 1 / width, 1 / height (pixels)
-    float4 drop;   // x: drawn radius, y: grid-to-world scale, z: grid centre, w: smoothing radius
-    float4 sun;    // xyz: toward the sun
-    float4 eye;    // xyz: the camera
-    float4 water;  // rgb: the water's colour, w: thickness scale
-};
 
 struct Sprite {
     float4 pos [[position]];
@@ -260,7 +298,7 @@ fragment float thickness_fs(Sprite s [[stage_in]], constant View &u [[buffer(1)]
 }
 
 // One direction of a bilateral blur: neighbours count less the further they are in depth, so
-// the drops melt into a surface but the edge of the ball stays sharp.
+// the drops melt into a surface but the edge of the water stays sharp.
 kernel void smooth(texture2d<float, access::read> src [[texture(0)]],
                    texture2d<float, access::write> dst [[texture(1)]],
                    constant View &u [[buffer(0)]],
@@ -305,11 +343,11 @@ vertex Full full_vs(uint vid [[vertex_id]]) {
 }
 
 // What the water reflects and refracts: a white photo studio, a grey floor far below, a large
-// softbox toward the sun and a strip light opposite it. (What the camera sees around the ball is
-// plain white.)
+// softbox toward the light and a strip light opposite it. (What the camera sees around the
+// water is plain white.)
 static float3 studio(float3 d, constant View &u) {
     float3 c = d.y >= 0.0 ? mix(float3(0.80), float3(1.0), smoothstep(0.0, 0.8, d.y))
-                          : mix(float3(0.75), float3(0.38), smoothstep(0.0, -0.3, d.y));
+                          : mix(float3(0.85), float3(0.6), smoothstep(0.0, -0.3, d.y));
     float3 key = u.sun.xyz;
     float k = dot(d, key);
     c += float3(1.0, 0.98, 0.95) * (smoothstep(0.93, 0.97, k) * 2.5 + pow(max(k, 0.0), 6.0) * 0.25);
@@ -319,13 +357,6 @@ static float3 studio(float3 d, constant View &u) {
     float across = abs(dot(d, normalize(cross(strip, float3(0.0, 1.0, 0.0)))));
     c += float3(1.6) * smoothstep(0.75, 0.85, side) * smoothstep(0.12, 0.06, across);
     return c;
-}
-
-static float3 view_pos(float2 uv, float d, constant View &u) {
-    float2 ndc = float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
-    float4 r = u.inv_proj * float4(ndc, 1.0, 1.0);
-    float3 ray = r.xyz / r.w;
-    return ray * (d / -ray.z);
 }
 
 fragment float4 composite_fs(Full f [[stage_in]],
@@ -369,7 +400,7 @@ fragment float4 composite_fs(Full f [[stage_in]],
     float3 V = normalize(eye - P);
 
     float t = thick.read(px).r;
-    float3 absorb = exp(-t * (1.0 - u.water.rgb) * 4.0);
+    float3 absorb = exp(-t * (1.0 - u.water.rgb) * 10.0);
     float3 refracted = refract(-V, N, 1.0 / 1.33);
     // Bent less than a real ball bends it, so the white behind shows through the middle.
     float3 behind = studio(normalize(mix(dir, refracted, 0.35)), u);

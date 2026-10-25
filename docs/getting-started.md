@@ -32,7 +32,7 @@ Happy Day/
 ├── faust.toml       who the app is, and how Faust builds and checks it
 ├── FAUST.md         the rules the assistant follows when it changes the app
 ├── src/main.rs      one window, and a menu with "Choose a Version…"
-├── src/water.rs     a ball of water in the window that ripples as the user types
+├── src/water.rs     water running over a small planet, which ripples as the user types
 ├── src/water.metal  its simulation and lighting, on the GPU
 └── src/composer.rs  the field at the bottom of the window where the user asks for a change
 ```

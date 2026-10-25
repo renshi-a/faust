@@ -1,6 +1,7 @@
-//! A ball of water that ripples as the person types. The water is simulated on the GPU with the
-//! material point method and drawn as a lit, refracting surface; the shaders are in
-//! `water.metal`, which Metal compiles when the app starts.
+//! Water running over a small planet nobody sees, which ripples as the person types and follows
+//! the pointer. It starts as a wall of water that falls onto the planet and wraps around it. The
+//! water is simulated on the GPU with the material point method and drawn as a lit, refracting
+//! surface; the shaders are in `water.metal`, which Metal compiles when the app starts.
 //!
 //! Metal is part of every Mac. Like AppKit, it is loaded at run time and reached through
 //! Objective-C messages, so the build needs no SDK and no Xcode.
@@ -20,14 +21,19 @@ use crate::{Id, Rect, Size, nsstring};
 const SHADERS: &str = include_str!("water.metal");
 /// The simulation grid's side, in cells.
 const GRID: u32 = 64;
-/// The ball's radius at rest, in cells, and how far apart its drops start.
-const RADIUS: f32 = 13.0;
+/// The planet's radius, in cells, and how far apart the drops start.
+const PLANET: f32 = 15.0;
 const SPACING: f32 = 0.5;
+/// How thick the wall of water starts, in cells.
+const WALL: f32 = 3.5;
 /// Simulation steps per frame, and their length.
 const SUBSTEPS: usize = 3;
 const DT: f32 = 0.16;
 /// One drop's size in a `Particle` (see `water.metal`): two `float3`s and a `float3x3`.
 const PARTICLE: usize = 80;
+/// The camera: how far from the planet's centre, and how wide it sees (radians, top to bottom).
+const DISTANCE: f32 = 2.5;
+const FOV: f32 = 0.75;
 const THREADS: usize = 64;
 
 // Metal's enumerations, as the headers number them.
@@ -83,6 +89,8 @@ struct SimParams {
     misc: [f32; 4],
     swirl: [f32; 4],
     tide: [f32; 4],
+    mouse: [f32; 4],
+    drag: [f32; 4],
     size: [u32; 4],
 }
 
@@ -97,14 +105,19 @@ struct Forces {
     tide: [f32; 4],
     /// The turn: its axis, and how fast.
     swirl: [f32; 4],
+    /// The pointer: where it is (a fraction of the view, y down), its reach in cells, and 1
+    /// when it is over the view.
+    mouse: [f32; 4],
+    /// How fast the pointer moves, in grid cells per time.
+    drag: [f32; 3],
 }
 
-/// The water's own motion `t` seconds in: a tide whose axis circles the ball and whose pull
+/// The water's own motion `t` seconds in: a tide whose axis circles the planet and whose pull
 /// swells and fades, and a slow turn about an axis that wanders. The rates never line up, so
-/// the ball keeps changing shape without end.
+/// the sea never quite settles.
 fn motion(t: f32) -> ([f32; 4], [f32; 4]) {
     let along = normalize([(t * 0.7).cos(), 0.6 * (t * 0.43).sin(), (t * 0.7).sin()]);
-    let tide = [along[0], along[1], along[2], 0.0009 * (0.6 + 0.4 * (t * 1.1).sin())];
+    let tide = [along[0], along[1], along[2], 0.005 * (0.6 + 0.4 * (t * 1.1).sin())];
     let axis = normalize([(t * 0.23).sin(), 1.0, (t * 0.31).cos()]);
     (tide, [axis[0], axis[1], axis[2], 0.022 * (t * 0.2).sin()])
 }
@@ -358,18 +371,17 @@ const LINE: MtlSize = MtlSize { width: THREADS, height: 1, depth: 1 };
 // ---------------------------------------------------------------------------------------------
 // The simulation
 
-/// Drops laid out on a lattice inside the ball, at rest, in grid cells.
+/// A wall of water standing at one side of the grid, at rest, in grid cells: it falls onto the
+/// planet when the app starts.
 fn starting_drops() -> Vec<[f32; 3]> {
-    let c = GRID as f32 / 2.0;
-    let steps = (RADIUS / SPACING) as i32;
-    let mut out = Vec::new();
-    for i in -steps..=steps {
-        for j in -steps..=steps {
-            for k in -steps..=steps {
-                let p = [i as f32 * SPACING, j as f32 * SPACING, k as f32 * SPACING];
-                if dot(p, p) <= RADIUS * RADIUS {
-                    out.push([c + p[0], c + p[1], c + p[2]]);
-                }
+    let (from, to) = (6.0, GRID as f32 - 6.0);
+    let across = ((to - from) / SPACING) as usize;
+    let deep = (WALL / SPACING) as usize;
+    let mut out = Vec::with_capacity(across * across * deep);
+    for i in 0..across {
+        for j in 0..across {
+            for k in 0..deep {
+                out.push([from + i as f32 * SPACING, from + j as f32 * SPACING, 5.0 + k as f32 * SPACING]);
             }
         }
     }
@@ -378,6 +390,8 @@ fn starting_drops() -> Vec<[f32; 3]> {
 
 struct Fluid {
     particles: Id,
+    /// Stands in for the depth texture until there is one (and in the self-test).
+    no_depth: Id,
     cells: Id,
     velocity: Id,
     count: usize,
@@ -406,6 +420,7 @@ impl Fluid {
         }
         Ok(Fluid {
             particles,
+            no_depth: gpu.texture(R32_FLOAT, 1, 1)?,
             cells: gpu.buffer(cells * 16)?,
             velocity: gpu.buffer(cells * 16)?,
             count: drops.len(),
@@ -417,18 +432,22 @@ impl Fluid {
         })
     }
 
-    /// One frame of simulation.
-    fn encode(&self, cmd: &AnyObject, f: &Forces) {
+    /// One frame of simulation. `view` and `depth` are the last frame's, for finding the
+    /// water under the pointer.
+    fn encode(&self, cmd: &AnyObject, f: &Forces, view: &ViewParams, depth: Option<&AnyObject>) {
         let c = GRID as f32 / 2.0;
         let params = SimParams {
-            centre: [c, c, c, 0.05],
+            centre: [c, c, c, 0.4],
             impulse: f.impulse,
-            fluid: [DT, 8.0, 5.0, 0.15],
-            misc: [65_536.0, f.burst, 3.5, 0.0],
+            fluid: [DT, 8.0, 3.0, 0.1],
+            misc: [65_536.0, f.burst, 3.5, PLANET],
             swirl: f.swirl,
             tide: f.tide,
+            mouse: f.mouse,
+            drag: [f.drag[0], f.drag[1], f.drag[2], 0.0],
             size: [self.count as u32, GRID, 0, 0],
         };
+        let depth = depth.unwrap_or(&self.no_depth);
         let cells = (GRID * GRID * GRID) as usize;
         // SAFETY: MTLComputeCommandEncoder's documented messages; every buffer outlives the
         // command buffer, and the parameters are copied when they are set.
@@ -449,6 +468,8 @@ impl Fluid {
                 set(&self.p2g_stress, &[&self.particles, &self.cells]);
                 let _: () = msg_send![&*e, dispatchThreadgroups: groups(self.count), threadsPerThreadgroup: LINE];
                 set(&self.grid_update, &[&self.cells, &self.velocity]);
+                let _: () = msg_send![&*e, setBytes: (view as *const ViewParams).cast::<c_void>(), length: size_of::<ViewParams>(), atIndex: 3usize];
+                let _: () = msg_send![&*e, setTexture: depth, atIndex: 0usize];
                 let _: () = msg_send![&*e, dispatchThreadgroups: groups(cells), threadsPerThreadgroup: LINE];
                 set(&self.g2p, &[&self.particles, &self.velocity]);
                 let _: () = msg_send![&*e, dispatchThreadgroups: groups(self.count), threadsPerThreadgroup: LINE];
@@ -505,6 +526,11 @@ impl Renderer {
             depth_test: depth_test.ok_or("no depth state")?,
             targets: RefCell::new(None),
         })
+    }
+
+    /// The water's smoothed depth from the last frame drawn, if any.
+    fn last_depth(&self) -> Option<Id> {
+        self.targets.borrow().as_ref().map(|t| t.depth.clone())
     }
 
     fn targets(&self, gpu: &Gpu, size: (usize, usize)) -> Result<(), String> {
@@ -607,10 +633,9 @@ impl Renderer {
 /// The camera, from how far round and how far up it is. `lift` is how much of the bottom of
 /// the view is covered (by the field), so the ball sits in the middle of the rest.
 fn view_params(yaw: f32, pitch: f32, size: (usize, usize), lift: f32, seconds: f32) -> ViewParams {
-    let distance = 1.85;
-    let eye = [yaw.sin() * pitch.cos() * distance, pitch.sin() * distance, yaw.cos() * pitch.cos() * distance];
+    let eye = [yaw.sin() * pitch.cos() * DISTANCE, pitch.sin() * DISTANCE, yaw.cos() * pitch.cos() * DISTANCE];
     let view = look_at(eye, [0.0, -0.02, 0.0]);
-    let proj = perspective(0.75, size.0 as f32 / size.1.max(1) as f32, lift, 0.05, 50.0);
+    let proj = perspective(FOV, size.0 as f32 / size.1.max(1) as f32, lift, 0.05, 50.0);
     let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
     let (w, h) = (size.0 as f32, size.1 as f32);
     let scale = 1.0 / 32.0;
@@ -625,7 +650,7 @@ fn view_params(yaw: f32, pitch: f32, size: (usize, usize), lift: f32, seconds: f
         inv_view: inverse(&view).unwrap_or(identity),
         inv_proj: inverse(&proj).unwrap_or(identity),
         screen: [w, h, 1.0 / w, 1.0 / h],
-        drop: [radius, scale, GRID as f32 / 2.0, radius * 3.0],
+        drop: [radius, scale, GRID as f32 / 2.0, radius * 4.0],
         sun: [sun[0], sun[1], sun[2], seconds],
         eye: [eye[0], eye[1], eye[2], 1.0],
         water: [r as f32, g as f32, b as f32, overlap],
@@ -652,10 +677,14 @@ pub fn selftest() -> Result<(), String> {
         // SAFETY: a command buffer from the queue, waited for before its buffers are read.
         unsafe {
             let cmd: Id = msg_send![&*gpu.queue, commandBuffer];
-            for frame in 0..90 {
-                let impulse = if frame % 30 == 0 { [32.0, 32.0 + RADIUS, 32.0, 1.2] } else { [0.0; 4] };
-                let (tide, swirl) = motion(frame as f32 / 60.0 * 8.0);
-                fluid.encode(&cmd, &Forces { impulse, burst: 0.0, tide, swirl });
+            let view = view_params(0.4, 0.3, (64, 64), 0.0, 0.0);
+            for frame in 0..240 {
+                let impulse = if frame % 40 == 0 { [32.0, 32.0 + PLANET + 3.0, 32.0, 1.2] } else { [0.0; 4] };
+                let (tide, swirl) = motion(frame as f32 / 60.0);
+                // The pointer held over the middle, moving, as if someone stirred the water.
+                let forces =
+                    Forces { impulse, burst: 0.0, tide, swirl, mouse: [0.5, 0.5, 6.0, 1.0], drag: [1.0, 0.0, 0.0] };
+                fluid.encode(&cmd, &forces, &view, None);
             }
             let _: () = msg_send![&*cmd, commit];
             let _: () = msg_send![&*cmd, waitUntilCompleted];
@@ -669,17 +698,19 @@ pub fn selftest() -> Result<(), String> {
     check(&fluid.positions())
 }
 
-/// The drops are numbers, inside the grid, and still a ball.
+/// The drops are numbers, outside the planet, and gathered around it.
 fn check(drops: &[[f32; 3]]) -> Result<(), String> {
     let c = GRID as f32 / 2.0;
     if drops.iter().flatten().any(|v| !v.is_finite()) {
         return Err("the water blew up".into());
     }
-    let mean =
-        drops.iter().map(|p| dot(sub(*p, [c, c, c]), sub(*p, [c, c, c])).sqrt()).sum::<f32>() / drops.len() as f32;
-    // At rest the drops' mean distance from the centre is three quarters of the radius.
-    if !(RADIUS * 0.4..RADIUS * 1.4).contains(&mean) {
-        return Err(format!("the water lost its shape (mean distance {mean:.1}, radius {RADIUS})"));
+    let distance = |p: &[f32; 3]| dot(sub(*p, [c, c, c]), sub(*p, [c, c, c])).sqrt();
+    if drops.iter().any(|p| distance(p) < PLANET - 0.5) {
+        return Err("water got into the planet".into());
+    }
+    let mean = drops.iter().map(distance).sum::<f32>() / drops.len() as f32;
+    if mean > PLANET + 12.0 {
+        return Err(format!("the water didn't gather on the planet (mean distance {mean:.1}, planet {PLANET})"));
     }
     Ok(())
 }
@@ -717,6 +748,10 @@ pub struct State {
     failed: Cell<bool>,
     /// The height at the bottom that something covers, in points.
     covered: f64,
+    /// Where the pointer is over the view (points, from the bottom left), if it is.
+    pointer: Cell<Option<[f64; 2]>>,
+    /// How far it has moved since the last frame, in points.
+    moved: Cell<[f64; 2]>,
 }
 
 define_class!(
@@ -747,7 +782,7 @@ define_class!(
                 msg_send![&*s, length]
             };
             let before = self.ivars().typed.replace(len);
-            if len == 0 && before > 0 { self.ivars().burst.set(0.8) } else { self.ripple(1.2) }
+            if len == 0 && before > 0 { self.ivars().burst.set(1.5) } else { self.ripple(4.0) }
         }
 
         #[unsafe(method(acceptsFirstResponder))]
@@ -758,7 +793,48 @@ define_class!(
 
         #[unsafe(method(keyDown:))]
         fn key_down(&self, _event: *mut AnyObject) {
-            self.ripple(1.2);
+            self.ripple(4.0);
+        }
+
+        /// Follows the pointer over the view, whether or not the window is in front.
+        #[unsafe(method(updateTrackingAreas))]
+        fn update_tracking_areas(&self) {
+            // SAFETY: NSView and NSTrackingArea messages on the main thread.
+            unsafe {
+                let areas: Id = msg_send![self, trackingAreas];
+                let n: usize = msg_send![&*areas, count];
+                for i in (0..n).rev() {
+                    let a: Id = msg_send![&*areas, objectAtIndex: i];
+                    let _: () = msg_send![self, removeTrackingArea: &*a];
+                }
+                let bounds: Rect = msg_send![self, bounds];
+                // Entered and exited, moved, always, in the visible rect.
+                let options = 0x01usize | 0x02 | 0x80 | 0x200;
+                let a: objc2::rc::Allocated<AnyObject> = msg_send![class!(NSTrackingArea), alloc];
+                let a: Id = msg_send![a, initWithRect: bounds, options: options, owner: self, userInfo: null::<AnyObject>()];
+                let _: () = msg_send![self, addTrackingArea: &*a];
+                let _: () = msg_send![super(self), updateTrackingAreas];
+            }
+        }
+
+        #[unsafe(method(mouseMoved:))]
+        fn mouse_moved(&self, event: *mut AnyObject) {
+            // SAFETY: -[NSEvent locationInWindow] and -[NSView convertPoint:fromView:].
+            let p: crate::Point = unsafe {
+                let p: crate::Point = msg_send![event, locationInWindow];
+                msg_send![self, convertPoint: p, fromView: null::<AnyObject>()]
+            };
+            let s = self.ivars();
+            if let Some(before) = s.pointer.get() {
+                let m = s.moved.get();
+                s.moved.set([m[0] + p.x - before[0], m[1] + p.y - before[1]]);
+            }
+            s.pointer.set(Some([p.x, p.y]));
+        }
+
+        #[unsafe(method(mouseExited:))]
+        fn mouse_exited(&self, _event: *mut AnyObject) {
+            self.ivars().pointer.set(None);
         }
 
         #[unsafe(method(mouseDragged:))]
@@ -802,6 +878,8 @@ impl WaterView {
             next_ripple: Cell::new(1.0),
             failed: Cell::new(false),
             covered,
+            pointer: Cell::new(None),
+            moved: Cell::new([0.0; 2]),
         };
         let this = WaterView::alloc(mtm).set_ivars(state);
         // SAFETY: NSView, NSTimer and NSNotificationCenter messages on the main thread. The
@@ -819,7 +897,7 @@ impl WaterView {
         }
     }
 
-    /// A ripple from a random spot on the side facing the camera, `strength` hard (a key is 1.2).
+    /// A ripple from a random spot on the side facing the camera, `strength` hard (a key is 4).
     fn ripple(&self, strength: f32) {
         let s = self.ivars();
         // A small xorshift keeps the spots varied without a dependency.
@@ -835,7 +913,27 @@ impl WaterView {
         let d = normalize([towards[0] + next() * 0.9, towards[1] + next() * 0.9, towards[2] + next() * 0.9]);
         s.seed.set(x);
         let c = GRID as f32 / 2.0;
-        s.impulse.set([c + d[0] * RADIUS, c + d[1] * RADIUS, c + d[2] * RADIUS, strength]);
+        let r = PLANET + WALL;
+        s.impulse.set([c + d[0] * r, c + d[1] * r, c + d[2] * r, strength]);
+    }
+
+    /// Where the pointer is, for the shaders, and how fast it moves through the water: its
+    /// movement on screen, at the planet's distance, in grid cells per time.
+    fn pointer_force(&self, bounds: Rect, view: &ViewParams) -> ([f32; 4], [f32; 3]) {
+        let s = self.ivars();
+        let moved = s.moved.replace([0.0; 2]);
+        let Some(p) = s.pointer.get() else { return ([0.0; 4], [0.0; 3]) };
+        let uv = [(p[0] / bounds.w) as f32, (1.0 - p[1] / bounds.h) as f32];
+        let world_per_point = 2.0 * DISTANCE * (FOV / 2.0).tan() / bounds.h.max(1.0) as f32;
+        let right = [view.view[0][0], view.view[1][0], view.view[2][0]];
+        let up = [view.view[0][1], view.view[1][1], view.view[2][1]];
+        let (dx, dy) = (moved[0] as f32 * world_per_point, moved[1] as f32 * world_per_point);
+        let per_time = 32.0 / (SUBSTEPS as f32 * DT);
+        let mut drag = [0.0; 3];
+        for (i, d) in drag.iter_mut().enumerate() {
+            *d = ((right[i] * dx + up[i] * dy) * per_time).clamp(-4.0, 4.0);
+        }
+        ([uv[0], uv[1], 6.0, 1.0], drag)
     }
 
     fn frame(&self) {
@@ -861,21 +959,22 @@ impl WaterView {
             let texture: Id = msg_send![&*drawable, texture];
             let t = s.start.elapsed().as_secs_f32();
             if t >= s.next_ripple.get() {
-                self.ripple(0.7);
+                self.ripple(3.0);
                 // Every second or so, not quite regularly.
                 let jitter = (s.seed.get() % 1000) as f32 / 1000.0;
                 s.next_ripple.set(t + 0.7 + jitter * 0.8);
             }
             let (tide, swirl) = motion(t);
+            let lift = (s.covered / bounds.h.max(1.0)) as f32;
+            let view = view_params(s.yaw.get(), s.pitch.get(), size, lift, t);
+            let (mouse, drag) = self.pointer_force(bounds, &view);
             let cmd: Id = msg_send![&*scene.gpu.queue, commandBuffer];
-            let forces = Forces { impulse: s.impulse.get(), burst: s.burst.get(), tide, swirl };
-            scene.fluid.encode(&cmd, &forces);
+            let forces = Forces { impulse: s.impulse.get(), burst: s.burst.get(), tide, swirl, mouse, drag };
+            scene.fluid.encode(&cmd, &forces, &view, scene.renderer.last_depth().as_deref());
             let mut impulse = s.impulse.get();
             impulse[3] *= 0.6;
             s.impulse.set(impulse);
             s.burst.set(s.burst.get() * 0.8);
-            let lift = (s.covered / bounds.h.max(1.0)) as f32;
-            let view = view_params(s.yaw.get(), s.pitch.get(), size, lift, s.start.elapsed().as_secs_f32());
             if let Err(e) = scene.renderer.draw(&scene.gpu, &scene.fluid, &cmd, &texture, size, &view) {
                 eprintln!("the water stopped: {e}");
                 s.failed.set(true);
@@ -893,16 +992,18 @@ mod tests {
 
     #[test]
     fn the_shader_structs_have_metals_sizes() {
-        assert_eq!(size_of::<SimParams>(), 112);
+        assert_eq!(size_of::<SimParams>(), 144);
         assert_eq!(size_of::<ViewParams>(), 4 * 64 + 5 * 16);
     }
 
     #[test]
-    fn the_ball_starts_inside_the_grid() {
+    fn the_wall_starts_inside_the_grid_and_off_the_planet() {
         let drops = starting_drops();
         assert!(drops.len() > 50_000, "{} drops", drops.len());
         assert!(drops.iter().flatten().all(|v| (2.0..GRID as f32 - 3.0).contains(v)));
-        assert_eq!(check(&drops), Ok(()));
+        let c = GRID as f32 / 2.0;
+        assert!(drops.iter().all(|p| dot(sub(*p, [c, c, c]), sub(*p, [c, c, c])).sqrt() > PLANET + 1.0));
+        assert!(check(&drops).is_err(), "a wall isn't gathered on the planet yet");
     }
 
     #[test]
