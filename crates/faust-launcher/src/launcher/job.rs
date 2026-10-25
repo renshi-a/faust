@@ -79,7 +79,12 @@ pub(crate) fn start(p: Paths, spec: Spec) {
     std::thread::spawn(move || {
         let id = spec.id;
         let cancel = spec.cancel.clone();
-        let out = match run(&p, spec) {
+        let out = run(&p, spec);
+        if out.is_err() {
+            // Nothing will use what was checked out and built; the logs and `try/<n>` stay.
+            let _ = std::fs::remove_dir_all(p.version_dir(id));
+        }
+        let out = match out {
             Err(_) if cancel.load(Ordering::Relaxed) => Outcome::Cancelled,
             Err(f) => Outcome::Failed { title: f.title, detail: f.detail, log: p.log(&format!("{id:04}-build.log")) },
             Ok(c) => Outcome::Candidate(c),

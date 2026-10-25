@@ -376,6 +376,19 @@ impl Controller {
         }
     }
 
+    /// Removes the folders in `versions/` of versions the state doesn't know, such as one whose
+    /// job was cut short when the launcher quit.
+    fn remove_stray_versions(&self) {
+        let Ok(entries) = std::fs::read_dir(&self.p.versions) else { return };
+        for e in entries.flatten() {
+            let id = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok());
+            if let Some(id) = id.filter(|id| self.state.get(*id).is_none()) {
+                let _ = std::fs::remove_dir_all(e.path());
+                log(&format!("removed the folder of unused version #{id}"));
+            }
+        }
+    }
+
     /// The current version kept running: it is good, and main follows it.
     fn started_ok(&mut self) {
         self.boot_failures = 0;
@@ -397,6 +410,9 @@ impl Controller {
             for id in self.state.prune() {
                 let _ = std::fs::remove_dir_all(self.p.version_dir(id));
                 log(&format!("removed version #{id}"));
+            }
+            if self.job.is_none() {
+                self.remove_stray_versions();
             }
             self.save();
         }
