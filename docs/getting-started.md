@@ -5,9 +5,9 @@ it by asking, breaks it on purpose to watch Faust roll it back, and ends with a 
 can hand out. It takes about fifteen minutes.
 
 You need an Apple silicon Mac with macOS 11 or later, [rustup](https://rustup.rs), git, and,
-for the change steps, [Claude Code](https://claude.com/claude-code) (signed in) or a model
-behind an OpenAI-compatible API, such as one you run with [Ollama](https://ollama.com) or
-[LM Studio](https://lmstudio.ai).
+for the change steps, [Claude Code](https://claude.com/claude-code) (signed in), ChatGPT or
+Gemini with an API key, or a model behind an OpenAI-compatible API, such as one you run with
+[Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai).
 
 ## 1. Install Faust
 
@@ -31,7 +31,8 @@ Happy Day/
 ├── Cargo.toml       an ordinary Rust package, plus faust-link
 ├── faust.toml       who the app is, and how Faust builds and checks it
 ├── FAUST.md         the rules the assistant follows when it changes the app
-└── src/main.rs      one window, and a menu with "Request a Change…"
+├── src/main.rs      one window, and a menu with "Choose a Version…"
+└── src/composer.rs  the field at the bottom of the window where the user asks for a change
 ```
 
 The template app reaches AppKit through Objective-C messages and loads it at run time, so it
@@ -87,14 +88,15 @@ Click through, and the app opens.
 
 ## 5. Ask for a change
 
-In the app, choose **Happy Day ▸ Request a Change…** and write what you want, for example:
+In the field at the bottom of the app's window, write what you want and press Enter, for example:
 
 > Make the greeting say good morning, and show today's date under it.
 
 Faust shows the request, which assistant will make it, what it may touch, and what it can do,
-and asks before anything starts. **Another Assistant…** switches to a different one: Claude
-Code, or a model at an address you give, such as `http://localhost:11434/v1` for Ollama. Faust
-lists that server's models and remembers your pick. Then a panel shows the assistant at work:
+and asks before anything starts. **Another Assistant…**, or the assistant's name under the
+field, switches to a different one: Claude Code, ChatGPT or Gemini (with an API key), or a
+model at an address you give, such as `http://localhost:11434/v1` for Ollama. Faust lists that
+server's models and remembers your pick. Then a panel shows the assistant at work:
 the files it reads and edits. When it
 is done, Faust builds the new version, runs the tests and `--selftest`, and asks whether to
 switch. **Show Changes** opens the diff. Switch, and the app restarts as the new version.

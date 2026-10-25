@@ -156,29 +156,30 @@ impl Controller {
         let answer = ui::alert(
             &tr!(en: "There is no assistant to make changes", ja: "変更を行うアシスタントがいません", de: "Es gibt keinen Assistenten für Änderungen", it: "Non c'è un assistente per le modifiche"),
             &tr!(
-                en: "Changes are made by Claude Code, or by a model you choose: one on this Mac (with Ollama or LM Studio, for example) or a hosted one with an OpenAI-compatible API.\n\nTo use Claude Code, install it, sign in, and ask again.\nhttps://claude.com/claude-code",
-                ja: "変更は Claude Code か、あなたが選んだモデルが行います。モデルは、この Mac で動くもの（Ollama や LM Studio など）でも、OpenAI 互換の API を持つホスティングされたものでも使えます。\n\nClaude Code を使うには、インストールしてサインインしてから、もう一度頼んでください。\nhttps://claude.com/claude-code",
-                de: "Änderungen nimmt Claude Code vor oder ein Modell deiner Wahl: eines auf diesem Mac (etwa mit Ollama oder LM Studio) oder ein gehostetes mit OpenAI-kompatibler API.\n\nUm Claude Code zu verwenden, installiere es, melde dich an und frag dann noch einmal.\nhttps://claude.com/claude-code",
-                it: "Le modifiche vengono apportate da Claude Code o da un modello a tua scelta: uno su questo Mac (per esempio con Ollama o LM Studio) o uno ospitato con un'API compatibile con OpenAI.\n\nPer usare Claude Code, installalo, accedi e poi chiedi di nuovo.\nhttps://claude.com/claude-code",
+                en: "Changes are made by Claude Code, or by a model you choose: ChatGPT or Gemini with an API key, one on this Mac (with Ollama or LM Studio, for example), or another with an OpenAI-compatible API.\n\nTo use Claude Code, install it, sign in, and ask again.\nhttps://claude.com/claude-code",
+                ja: "変更は Claude Code か、あなたが選んだモデルが行います。モデルは、API キーを使う ChatGPT や Gemini、この Mac で動くもの（Ollama や LM Studio など）、OpenAI 互換の API を持つほかのものから選べます。\n\nClaude Code を使うには、インストールしてサインインしてから、もう一度頼んでください。\nhttps://claude.com/claude-code",
+                de: "Änderungen nimmt Claude Code vor oder ein Modell deiner Wahl: ChatGPT oder Gemini mit einem API-Schlüssel, eines auf diesem Mac (etwa mit Ollama oder LM Studio) oder ein anderes mit OpenAI-kompatibler API.\n\nUm Claude Code zu verwenden, installiere es, melde dich an und frag dann noch einmal.\nhttps://claude.com/claude-code",
+                it: "Le modifiche vengono apportate da Claude Code o da un modello a tua scelta: ChatGPT o Gemini con una chiave API, uno su questo Mac (per esempio con Ollama o LM Studio) o un altro con un'API compatibile con OpenAI.\n\nPer usare Claude Code, installalo, accedi e poi chiedi di nuovo.\nhttps://claude.com/claude-code",
             ),
             &[&choose, "OK"],
         );
-        if answer == 0 { self.choose_model() } else { None }
+        if answer == 0 { self.choose_assistant() } else { None }
     }
 
     /// Lets the user choose who makes the changes, and keeps the choice. `None` when they
     /// cancel.
-    fn choose_assistant(&mut self) -> Option<Assistant> {
+    pub(super) fn choose_assistant(&mut self) -> Option<Assistant> {
         let claude = assistant::find().filter(|a| !a.too_old());
         let mut items = Vec::new();
         if let Some(c) = &claude {
             items.push(format!("Claude Code {}", c.title()));
         }
+        items.extend(model::SERVICES.iter().map(|s| s.name.to_owned()));
         items.push(tr!(
-            en: "A model you choose (Ollama, LM Studio, OpenAI, …)",
-            ja: "選んだモデル（Ollama、LM Studio、OpenAI など）",
-            de: "Ein Modell deiner Wahl (Ollama, LM Studio, OpenAI, …)",
-            it: "Un modello a tua scelta (Ollama, LM Studio, OpenAI, …)",
+            en: "Another model (Ollama, LM Studio, OpenRouter, …)",
+            ja: "ほかのモデル（Ollama、LM Studio、OpenRouter など）",
+            de: "Ein anderes Modell (Ollama, LM Studio, OpenRouter, …)",
+            it: "Un altro modello (Ollama, LM Studio, OpenRouter, …)",
         ));
         let (button, item) = ui::pick(
             &tr!(en: "Who should make the changes?", ja: "だれに変更してもらいますか？", de: "Wer soll die Änderungen vornehmen?", it: "Chi deve apportare le modifiche?"),
@@ -194,59 +195,59 @@ impl Controller {
         if button != 0 {
             return None;
         }
-        match claude {
+        let item = match claude {
             Some(c) if item == 0 => {
                 self.keep_choice(&Choice::ClaudeCode);
-                Some(c)
+                return Some(c);
             }
-            _ => self.choose_model(),
-        }
+            Some(_) => item - 1,
+            None => item,
+        };
+        self.choose_model(model::SERVICES.get(item))
     }
 
-    /// Asks where the model is and which one to use.
-    fn choose_model(&mut self) -> Option<Assistant> {
+    /// Asks where the model is (unless it is one of the `service`s) and which one to use.
+    fn choose_model(&mut self, service: Option<&model::Service>) -> Option<Assistant> {
         let before = match assistant::load(&self.p.assistant) {
             Some(Choice::Model(e)) => Some(e),
             _ => None,
         };
-        let url = ui::ask_text(
-            &tr!(en: "Where is the model?", ja: "モデルはどこにありますか？", de: "Wo ist das Modell?", it: "Dov'è il modello?"),
-            &tr!(
-                en: "The address of an OpenAI-compatible API, for example:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
-                ja: "OpenAI 互換 API のアドレスです。たとえば:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
-                de: "Die Adresse einer OpenAI-kompatiblen API, zum Beispiel:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
-                it: "L'indirizzo di un'API compatibile con OpenAI, per esempio:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
-            ),
-            before.as_ref().map_or("http://localhost:11434/v1", |e| e.url.as_str()),
-            &next_title(),
-            &cancel_title(),
-        )?;
-        let url = url.trim().trim_end_matches('/').to_owned();
-        if !(url.starts_with("http://") || url.starts_with("https://")) {
-            ui::alert(
-                &tr!(en: "That isn't an address", ja: "アドレスではありません", de: "Das ist keine Adresse", it: "Non è un indirizzo"),
-                &tr!(en: "It starts with http:// or https://.", ja: "http:// か https:// で始まります。", de: "Sie beginnt mit http:// oder https://.", it: "Inizia con http:// o https://."),
-                &["OK"],
-            );
-            return None;
-        }
+        let url = match service {
+            Some(s) => s.url.to_owned(),
+            None => self.ask_model_url(before.as_ref())?,
+        };
         let file = super::paths::Paths::tilde(&self.p.assistant);
-        let key = ui::ask_text(
-            &tr!(en: "API key", ja: "API キー", de: "API-Schlüssel", it: "Chiave API"),
-            &tr!(
+        let key_text = match service {
+            Some(s) => {
+                let (name, keys) = (s.name, s.keys);
+                tr!(
+                    en: "{name} needs an API key, which you can make at {keys}. Using the API isn't part of a ChatGPT or Gemini subscription; it is billed on its own. The key is kept in {file}, which only you can read, and the builds can't.",
+                    ja: "{name} には API キーが要ります。{keys} で作れます。API の利用は ChatGPT や Gemini の有料プランに含まれず、別に料金がかかります。キーは {file} に保存され、あなただけが読めます。ビルドからは読めません。",
+                    de: "{name} braucht einen API-Schlüssel, den du unter {keys} erstellen kannst. Die API gehört nicht zu einem ChatGPT- oder Gemini-Abo und wird eigens abgerechnet. Der Schlüssel wird in {file} gespeichert, das nur du lesen kannst, die Builds nicht.",
+                    it: "{name} richiede una chiave API, che puoi creare su {keys}. L'uso dell'API non è incluso in un abbonamento a ChatGPT o Gemini e si paga a parte. La chiave viene salvata in {file}, che solo tu puoi leggere, e le compilazioni no.",
+                )
+            }
+            None => tr!(
                 en: "Leave it empty for a model on this Mac. It is kept in {file}, which only you can read, and the builds can't.",
                 ja: "この Mac で動くモデルなら空のままにしてください。キーは {file} に保存され、あなただけが読めます。ビルドからは読めません。",
                 de: "Für ein Modell auf diesem Mac leer lassen. Er wird in {file} gespeichert, das nur du lesen kannst, die Builds nicht.",
                 it: "Lasciala vuota per un modello su questo Mac. Viene salvata in {file}, che solo tu puoi leggere, e le compilazioni no.",
             ),
+        };
+        let key = ui::ask_text(
+            &tr!(en: "API key", ja: "API キー", de: "API-Schlüssel", it: "Chiave API"),
+            &key_text,
             before.as_ref().filter(|e| e.url == url).map_or("", |e| e.key.as_str()),
             &next_title(),
             &cancel_title(),
         )?;
+        if service.is_some() && key.trim().is_empty() {
+            return None;
+        }
         let mut e = Endpoint { url, model: String::new(), key: key.trim().to_owned() };
         let which = tr!(en: "Which model?", ja: "どのモデルにしますか？", de: "Welches Modell?", it: "Quale modello?");
         let previous = before.as_ref().map_or("", |b| b.model.as_str());
-        e.model = match model::models(&e, &self.p.log("assistant.log")) {
+        e.model = match model::models(&e, &self.p.log("assistant.log")).map(model::chat_models) {
             Ok(ids) if !ids.is_empty() => {
                 let host = e.host();
                 let (button, item) = ui::pick(
@@ -294,10 +295,37 @@ impl Controller {
         Some(Assistant::model(e))
     }
 
+    /// Asks for the address of an OpenAI-compatible API.
+    fn ask_model_url(&self, before: Option<&Endpoint>) -> Option<String> {
+        let url = ui::ask_text(
+            &tr!(en: "Where is the model?", ja: "モデルはどこにありますか？", de: "Wo ist das Modell?", it: "Dov'è il modello?"),
+            &tr!(
+                en: "The address of an OpenAI-compatible API, for example:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
+                ja: "OpenAI 互換 API のアドレスです。たとえば:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
+                de: "Die Adresse einer OpenAI-kompatiblen API, zum Beispiel:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
+                it: "L'indirizzo di un'API compatibile con OpenAI, per esempio:\nOllama: http://localhost:11434/v1\nLM Studio: http://localhost:1234/v1\nllama.cpp: http://localhost:8080/v1\nOpenAI: https://api.openai.com/v1\nOpenRouter: https://openrouter.ai/api/v1",
+            ),
+            before.as_ref().map_or("http://localhost:11434/v1", |e| e.url.as_str()),
+            &next_title(),
+            &cancel_title(),
+        )?;
+        let url = url.trim().trim_end_matches('/').to_owned();
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            ui::alert(
+                &tr!(en: "That isn't an address", ja: "アドレスではありません", de: "Das ist keine Adresse", it: "Non è un indirizzo"),
+                &tr!(en: "It starts with http:// or https://.", ja: "http:// か https:// で始まります。", de: "Sie beginnt mit http:// oder https://.", it: "Inizia con http:// o https://."),
+                &["OK"],
+            );
+            return None;
+        }
+        Some(url)
+    }
+
     fn keep_choice(&self, choice: &Choice) {
         if let Err(e) = assistant::save(&self.p.assistant, choice) {
             log(&format!("couldn't save the assistant: {e}"));
         }
+        self.tell_assistant();
     }
 
     /// Tells the app about a confirmation, so a trusted device can answer it too.
@@ -310,6 +338,15 @@ impl Controller {
             c.send(&json!({"type": "confirmation", "id": id, "kind": kind, "title": title, "text": text, "choices": choices}));
         }
         id
+    }
+
+    /// Tells the app who makes the next change, for it to show. Only Faust's own window
+    /// chooses it.
+    pub(super) fn tell_assistant(&self) {
+        if let Some(c) = &self.child {
+            let name = self.assistant().map(|a| a.name().to_owned()).unwrap_or_default();
+            c.send(&json!({"type": "assistant", "name": name}));
+        }
     }
 
     /// The confirmation was answered (here or on a device).

@@ -1,21 +1,24 @@
 //! Hello: a small macOS app that its users can change by asking.
 //!
-//! It opens one window, and its app menu has "Request a Change…" and "Choose a Version…".
-//! Those talk to Faust through `faust_link`, which also tells Faust when the window is up and
-//! hears when to quit. AppKit is loaded at run time and reached through Objective-C messages,
-//! so the build needs no SDK and no Xcode.
+//! It opens one window with a field at the bottom for asking for a change, and its app menu
+//! has "Choose a Version…". Both talk to Faust through `faust_link`, which also tells Faust
+//! when the window is up and hears when to quit. AppKit is loaded at run time and reached
+//! through Objective-C messages, so the build needs no SDK and no Xcode.
 
+mod composer;
+
+use std::cell::OnceCell;
 use std::ptr::null;
 
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyObject, Bool, NSObject, Sel};
-use objc2::{MainThreadMarker, MainThreadOnly, class, define_class, msg_send, sel};
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, class, define_class, msg_send, sel};
 
 type Id = Retained<AnyObject>;
 
 /// The text in the window. Changing it is a good first request.
 fn greeting() -> &'static str {
-    "Hello! Ask me for a change from the Hello menu."
+    "Hello! Ask me for a change below."
 }
 
 fn main() {
@@ -28,7 +31,7 @@ fn main() {
     load_appkit();
     let mtm = MainThreadMarker::new().expect("main runs on the main thread");
     let target: Retained<Target> = {
-        let this = Target::alloc(mtm).set_ivars(());
+        let this = Target::alloc(mtm).set_ivars(OnceCell::new());
         // SAFETY: -[NSObject init] on a freshly allocated object.
         unsafe { msg_send![super(this), init] }
     };
@@ -37,7 +40,7 @@ fn main() {
         let app: Id = msg_send![class!(NSApplication), sharedApplication];
         let _: Bool = msg_send![&*app, setActivationPolicy: 0isize]; // regular: a Dock icon
         let _: () = msg_send![&*app, setMainMenu: &*menu_bar(&target)];
-        let window = window();
+        let window = window(mtm, &target);
         let _: () = msg_send![&*window, makeKeyAndOrderFront: null::<AnyObject>()];
         let _: () = msg_send![&*app, activateIgnoringOtherApps: Bool::YES];
         if let Some(link) = faust_link::get() {
@@ -56,16 +59,10 @@ define_class!(
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "AppTarget"]
+    #[ivars = OnceCell<Retained<composer::Composer>>] // the field, to show who makes changes
     struct Target;
 
     impl Target {
-        #[unsafe(method(requestChange:))]
-        fn request_change(&self, _sender: *mut AnyObject) {
-            if let Some(link) = faust_link::get() {
-                link.request_change(None);
-            }
-        }
-
         #[unsafe(method(chooseVersion:))]
         fn choose_version(&self, _sender: *mut AnyObject) {
             if let Some(link) = faust_link::get() {
@@ -75,7 +72,18 @@ define_class!(
 
         #[unsafe(method(tick:))]
         fn tick(&self, _arg: *mut AnyObject) {
-            let quit = faust_link::get().is_some_and(|link| link.events().contains(&faust_link::Event::Quit));
+            let mut quit = false;
+            for event in faust_link::get().map(faust_link::Link::events).unwrap_or_default() {
+                match event {
+                    faust_link::Event::Quit => quit = true,
+                    faust_link::Event::Assistant(name) => {
+                        if let Some(field) = self.ivars().get() {
+                            field.set_assistant(&name);
+                        }
+                    }
+                    _ => {}
+                }
+            }
             // SAFETY: NSApplication and NSObject messages on the main thread.
             unsafe {
                 if quit {
@@ -127,8 +135,6 @@ fn menu_bar(target: &Target) -> Id {
         let menu: Id = msg_send![class!(NSMenu), new];
         if faust_link::get().is_some() {
             let _: () =
-                msg_send![&*menu, addItem: &*menu_item("Request a Change…", sel!(requestChange:), "", Some(target))];
-            let _: () =
                 msg_send![&*menu, addItem: &*menu_item("Choose a Version…", sel!(chooseVersion:), "", Some(target))];
             let separator: Id = msg_send![class!(NSMenuItem), separatorItem];
             let _: () = msg_send![&*menu, addItem: &*separator];
@@ -159,21 +165,54 @@ unsafe impl objc2::Encode for Rect {
     );
 }
 
-fn window() -> Id {
-    // SAFETY: NSWindow and NSTextField messages on the main thread.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+// SAFETY: the layout matches CGPoint (two doubles).
+unsafe impl objc2::Encode for Point {
+    const ENCODING: objc2::Encoding = objc2::Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Size {
+    w: f64,
+    h: f64,
+}
+
+// SAFETY: the layout matches CGSize (two doubles).
+unsafe impl objc2::Encode for Size {
+    const ENCODING: objc2::Encoding = objc2::Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
+}
+
+fn window(mtm: MainThreadMarker, target: &Target) -> Id {
+    // SAFETY: NSWindow, NSTextField and NSView messages on the main thread.
     unsafe {
         let w: Allocated<AnyObject> = msg_send![class!(NSWindow), alloc];
         // Titled, closable, miniaturizable, resizable.
-        let w: Id = msg_send![w, initWithContentRect: Rect { x: 0.0, y: 0.0, w: 480.0, h: 280.0 }, styleMask: 15usize, backing: 2usize, defer: Bool::NO];
+        let w: Id = msg_send![w, initWithContentRect: Rect { x: 0.0, y: 0.0, w: 560.0, h: 360.0 }, styleMask: 15usize, backing: 2usize, defer: Bool::NO];
         let _: () = msg_send![&*w, setTitle: &*nsstring("Hello")];
         let _: () = msg_send![&*w, setReleasedWhenClosed: Bool::NO];
         let label: Id = msg_send![class!(NSTextField), wrappingLabelWithString: &*nsstring(greeting())];
         let font: Id = msg_send![class!(NSFont), systemFontOfSize: 20.0f64];
         let _: () = msg_send![&*label, setFont: &*font];
         let _: () = msg_send![&*label, setAlignment: 1isize]; // centered
-        let _: () = msg_send![&*label, setFrame: Rect { x: 40.0, y: 100.0, w: 400.0, h: 80.0 }];
+        let _: () = msg_send![&*label, setFrame: Rect { x: 40.0, y: 240.0, w: 480.0, h: 80.0 }];
+        let _: () = msg_send![&*label, setAutoresizingMask: 10usize]; // stays at the top, as wide as the window
         let content: Id = msg_send![&*w, contentView];
         let _: () = msg_send![&*content, addSubview: &*label];
+        if faust_link::get().is_some() {
+            let field = composer::Composer::new(mtm, 520.0, "Ask Hello for a change");
+            let _: () = msg_send![&*field, setFrameOrigin: Point { x: 20.0, y: 20.0 }];
+            let _: () = msg_send![&*field, setAutoresizingMask: 34usize]; // stays at the bottom, as wide as the window
+            let _: () = msg_send![&*content, addSubview: &*field];
+            field.focus();
+            let _ = target.ivars().set(field);
+        }
         let _: () = msg_send![&*w, center];
         w
     }

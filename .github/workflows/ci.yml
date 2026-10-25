@@ -29,6 +29,15 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      # `faust new` points apps at the tag of this version: once it is out, faust-link can't
+      # change without a new version, or new apps get a faust-link that doesn't match them.
+      - name: faust-link matches its release
+        run: |
+          git fetch --tags --quiet
+          tag="v$(cargo pkgid -p faust-launcher | sed 's/.*[#@]//')"
+          if git rev-parse --quiet --verify "refs/tags/$tag" > /dev/null; then
+            git diff --exit-code "$tag" -- crates/faust-link/src
+          fi
 
   example:
     name: build examples/hello without Xcode

@@ -64,8 +64,8 @@ template's `src/main.rs` is deliberately plain.
 
 ## Let the app ask
 
-The template's "Request a Change…" menu item works for any app, but an app that understands what
-the user wants can ask directly: `link.request_change(Some("Make the font larger"))`. Faust shows
+The template's field takes whatever the user writes, but an app that understands what the user
+wants can ask directly: `link.request_change(Some("Make the font larger"))`. Faust shows
 that text to the user before anything happens, so the app suggests and the user decides.
 
 How the app takes requests is part of the app, so it is the user's to change as well. A text

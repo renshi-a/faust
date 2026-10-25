@@ -6,7 +6,7 @@ when asked. It has no dependencies.
 
 ```toml
 [dependencies]
-faust-link = { git = "https://github.com/renshi-a/faust", tag = "v0.1.0" }
+faust-link = { git = "https://github.com/renshi-a/faust", tag = "v0.2.0" }
 ```
 
 ```rust
@@ -15,13 +15,8 @@ if let Some(link) = faust_link::get() {
     link.ready();
 }
 
-// From "Request a Change…" in the app's menu:
-if let Some(link) = faust_link::get() {
-    link.request_change(None);
-}
-
-// From inside the app, when it understood what the user wants. Faust shows the text to the
-// user and asks before anything happens:
+// From the field where the user asks for a change, or from inside the app when it understood
+// what the user wants. Faust shows the text to the user and asks before anything happens:
 if let Some(link) = faust_link::get() {
     link.request_change(Some("Make the font larger"));
 }
