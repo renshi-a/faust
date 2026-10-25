@@ -104,7 +104,11 @@ the app to the Trash.
   the network during builds: build scripts and tests can read what the user can, and code in
   the source could send it somewhere.
 - **A perfect jail.** `sandbox-exec` is not a virtual machine. The profile closes the ways out
-  we know of, but code that runs in it should still be treated as code you are running.
+  we know of, but code that runs in it should still be treated as code you are running. In
+  particular, the tools it may not start are refused by path: a copy of `launchctl`, or code
+  that sends launchd the same request itself, could still ask launchd to run a job outside the
+  sandbox. Builds have to run programs they just wrote (build scripts, tests), so running from
+  the writable folders can't be refused.
 - **The app at run time.** Once the user switches to a version, it runs with the user's
   rights, like any app: it could edit Faust's files (including the list of trusted devices) or
   anything else the user can. Faust decides which version runs, and keeps every earlier one to

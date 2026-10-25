@@ -20,10 +20,10 @@ If an app didn't suit someone, they used to ask its developer and wait. Now anyo
 describe a change in plain words and have an AI write it, and many people already build small
 apps for themselves this way. Faust brings that to the apps you ship.
 
-A user asks for a change inside the app. The AI model they chose recreates the app on their
-PC, Faust builds and tests it, and they switch only if it passes and they agree. A version that
-can't start is rolled back, your updates are merged with their changes, and nothing needs
-Xcode.
+A user asks for a change inside the app. The AI model they chose rewrites the app's source on
+their Mac, Faust builds and tests it, and they switch only if it passes and they agree. A
+version that can't start is rolled back, your updates are merged with their changes, and users
+never need Xcode.
 
 ```
 ┌─ Hello.app ─────────────────────────────────────────────────────────────┐
@@ -96,7 +96,7 @@ need an API key, or another model by its address (Ollama's is `http://localhost:
 A repairable app is an ordinary Rust app with three additions.
 
 ```
-happy-day/
+Happy Day/
 ├── Cargo.toml       depends on faust-link
 ├── faust.toml       who the app is, and how to build and check it
 ├── FAUST.md         the rules the AI follows when it changes the app
