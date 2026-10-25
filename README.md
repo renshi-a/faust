@@ -41,7 +41,6 @@ with Rust, against a tiny SDK it writes itself.
 - [Commands](#commands)
 - [What keeps users safe](#what-keeps-users-safe)
 - [Requirements](#requirements)
-- [Status](#status)
 - [Documentation](#documentation)
 - [Contributing](#contributing) · [License](#license) · [Acknowledgments](#acknowledgments)
 
@@ -206,22 +205,6 @@ report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 | Xcode | only for `faust release` (`notarytool`, `stapler`) | not needed |
 | Claude Code | to try changes | to ask for changes |
 | Disk | | about 3 GB free for the toolchain, crates and versions |
-
-## Status
-
-Faust is young. It was split out of the launcher of VisualClaw, a desk robot app that is
-changed this way, so that any app can do the same. Expect the configuration and the protocol
-to change before 1.0; both carry versions, so a launcher can keep talking to apps built for an
-older one. The crates aren't on crates.io yet: install from this repository, and new apps
-depend on `faust-link` by its git tag.
-
-Planned next:
-
-- Downloads besides Rust that an app declares in `faust.toml` (pinned by hash), such as a
-  Node runtime.
-- More assistants than Claude Code (`codex exec`, `gemini -p`).
-- `faust doctor`: checks an app for what keeps it repairable, and explains what doesn't.
-- App templates for UI frameworks (GPUI, egui) once they build without Xcode.
 
 ## Documentation
 
