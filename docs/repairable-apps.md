@@ -78,4 +78,5 @@ version still passes the checks, and holding Option at start still opens the ver
 Your releases are merged with what each user changed. Small, focused commits merge more
 cleanly than sweeping reformatting; a release that reformats every file guarantees conflicts for
 every user who changed anything. Write release notes (the commit's subject becomes the update's
-notes): they reach the assistant when it resolves a conflict.
+notes): they reach the assistant when it resolves a conflict, or when it makes the user's
+requests again on your release.

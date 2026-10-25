@@ -19,6 +19,10 @@ case "$mode" in
     /usr/bin/sed -i '' -e '$d' src/main.rs
     /usr/bin/sed -i '' 's/(0.20, 0.55, 0.95)/(0.10, 0.70, 0.60)/' src/main.rs
     msg="Removed the broken function and made the water green." ;;
+  green-water)
+    # "Make the water green" again, on whatever colour the water has now.
+    /usr/bin/sed -i '' -E 's/^const WATER: \(f64, f64, f64\) = .*;$/const WATER: (f64, f64, f64) = (0.10, 0.70, 0.60);/' src/main.rs
+    msg="Made the water green again." ;;
   crash)
     /usr/bin/sed -i '' 's/^    load_appkit();$/    std::process::exit(3);/' src/main.rs
     msg="Made it start faster." ;;

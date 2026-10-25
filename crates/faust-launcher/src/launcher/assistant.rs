@@ -236,6 +236,22 @@ impl Brief {
             app = self.app,
         )
     }
+
+    /// An official update conflicts, and the user asked for their earlier requests to be made
+    /// again on it, one at a time: this is one of them.
+    pub(crate) fn replay(&self, request: &str, update: &str, notes: &str) -> String {
+        let lang = Brief::language();
+        let notes = if notes.trim().is_empty() { "(no notes)" } else { notes };
+        format!(
+            "{}\n\n{app} was just updated to a new official version ({update}). Earlier, on the previous version, \
+             this person asked for the change below. The source here is the new official version, with their requests \
+             before this one already made again on it. Make this change again here, and keep what the update brings.\n\n\
+             Their request:\n{request}\n\nWhat the update brings:\n{notes}\n\n\
+             When you are done, reply with what you changed and how, in at most three lines of {lang}.",
+            self.preamble(),
+            app = self.app,
+        )
+    }
 }
 
 /// Runs the assistant in `cwd` (the repository), continuing `resume` if given. `on_log` gets
@@ -497,6 +513,14 @@ mod tests {
                 && p.contains("read FAUST.md")
                 && p.contains("make it blue")
                 && p.contains("lines of English"),
+            "{p}"
+        );
+        let p = b.replay("make it blue", "Official update 2.0", "");
+        assert!(
+            p.contains("read FAUST.md")
+                && p.contains("new official version (Official update 2.0)")
+                && p.contains("Their request:\nmake it blue")
+                && p.contains("(no notes)"),
             "{p}"
         );
     }

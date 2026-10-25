@@ -70,9 +70,25 @@ start twice in a row is replaced by the previous good one.
 commit's time, or the moment a working tree was packaged). When it is larger than the last one
 imported, the shipped source becomes a new commit on `upstream`. If the user changed nothing,
 the update is checked as it is; otherwise `main` and `upstream` are merged three ways. A clean
-merge is checked like any candidate. A conflicting one is offered to the assistant, with what the
-user asked for so far (read from the commit messages) and the update's notes; or the user's
-changes are set aside on `before/<release>`; or the user waits. A newer Rust release is
+merge is checked like any candidate. When the merge conflicts, the user picks one of four:
+
+- **Combine them.** The merge, markers and all, is offered to the assistant, with what the user
+  asked for so far and the update's notes.
+- **Redo the requests.** The user's changes are taken as what they asked for rather than as a
+  diff: the `Request:` of each commit on `main` since it left `upstream` (see
+  [the repository](#the-repository)), oldest first. Faust says how many there are, and that
+  each one takes about as long as a change, and asks. On yes, `main` is kept on
+  `before/<release>`, the work tree becomes `upstream`, and each request goes to the
+  assistant again, with the update's notes; each becomes a commit on the previous one,
+  with the same message format, so a later update can redo it again. Each one passes the gate
+  (with the same two tries to fix it) before the next starts. When one fails, Faust stops
+  there: if any came before it, the last one that passed is the candidate, and the user is
+  shown which requests were made again, which one stopped it and why, and which weren't asked;
+  the rest stay on `before/<release>`. When the first one fails, nothing changes.
+- **Use the official version.** `main` is set aside on `before/<release>`.
+- **Later.** The user keeps the current version and is asked again at the next start.
+
+Whichever it is, the result is checked and offered like any candidate. A newer Rust release is
 installed first, after asking.
 
 ## The assistant
@@ -114,7 +130,7 @@ on a Mac without the Command Line Tools is only a shim that offers to install th
 | `upstream` | official releases, one commit each, authored by the app with the release's own time, so the same release makes the same commit on every Mac |
 | `try/<n>` | every candidate, used or not |
 | `wip/<time>` | files the user edited by hand, saved before a switch replaced them |
-| `before/<release>` | the user's changes, set aside for an official version |
+| `before/<release>` | the user's changes as they were before an official version replaced them or their requests were redone on it |
 
 A change's commit message keeps the request and the assistant's summary:
 
