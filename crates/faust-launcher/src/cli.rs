@@ -29,7 +29,7 @@ enum Command {
     Test(ProjectArgs),
     /// Make the .app users download: the launcher and the app's source.
     Package(PackageArgs),
-    /// Package the working tree and open it, as a user would.
+    /// Package the working tree and open it, as a user would (building first if there is no Cargo.lock).
     Dev(DevArgs),
     /// Sign, notarize and staple a packaged app, and make the .dmg to hand out.
     Release(crate::release::ReleaseArgs),
@@ -143,6 +143,11 @@ fn build(args: &BuildArgs) -> Result<()> {
     let project = Project { root: &root, config: &config, toolchain: &toolchain, target_dir };
     project.build(args.build_number, &mut Sink { log: &log, limits: Limits::none(), on_line: &mut print_line })?;
     Ok(())
+}
+
+/// Builds the app at `root` as `faust build` does.
+pub(crate) fn build_at(root: &Path) -> Result<()> {
+    build(&BuildArgs { project: ProjectArgs { path: root.to_owned(), target_dir: None, log: None }, build_number: 0 })
 }
 
 fn test(args: &ProjectArgs) -> Result<()> {

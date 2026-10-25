@@ -67,9 +67,9 @@ pub(crate) fn create(dir: &Path, name: Option<&str>, id: Option<&str>) -> Result
     println!();
     println!("Next:");
     println!("  cd {}", dir.display());
-    println!("  git init && git add -A && git commit -m \"Start {name}\"");
-    println!("  faust build        # dist/{name}.app, built without Xcode");
-    println!("  faust dev          # open it the way a user would, then ask it for a change");
+    println!("  faust dev          # build it without Xcode, open it as a user would, ask it for a change");
+    println!();
+    println!("Commit before `faust package` or `faust release`: they package what is committed.");
     Ok(())
 }
 

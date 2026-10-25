@@ -24,6 +24,12 @@ pub(crate) fn run(path: &Path, fresh: bool) -> Result<()> {
     }
     std::fs::create_dir_all(&support)?;
 
+    // A new app has no Cargo.lock yet, and packaging needs one; the first build writes it.
+    if !root.join("Cargo.lock").is_file() {
+        eprintln!("== build once to write Cargo.lock");
+        cli::build_at(&root)?;
+    }
+
     eprintln!("== package the working tree");
     let bundle = cli::package_worktree(&root, &dev)?;
     let exe = bundle.join("Contents/MacOS").join(config.binary(&root)?);
