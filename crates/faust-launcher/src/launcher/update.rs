@@ -8,7 +8,7 @@ use gix::ObjectId;
 
 use super::controller::{Controller, later_title};
 use super::job::{self, Plan};
-use super::{assistant, log, toolchain};
+use super::{log, toolchain};
 use crate::repo::{MAIN, MergeLabels, Repo, UPSTREAM};
 use crate::ui;
 
@@ -102,8 +102,9 @@ impl Controller {
         title: String,
     ) -> Result<()> {
         let list = merge.conflicts.iter().map(|c| format!("• {c}")).collect::<Vec<_>>().join("\n");
-        let found = assistant::find();
-        let resolve = tr!(en: "Let Claude Code Combine Them", ja: "Claude Code に合わせてもらう", de: "Von Claude Code zusammenführen lassen", it: "Falle unire da Claude Code");
+        let found = self.assistant().filter(|a| !a.too_old());
+        let name = found.as_ref().map_or("", |a| a.name()).to_owned();
+        let resolve = tr!(en: "Let {name} Combine Them", ja: "{name} に合わせてもらう", de: "Von {name} zusammenführen lassen", it: "Falle unire da {name}");
         let official = tr!(en: "Use the Official Version", ja: "公式バージョンにする", de: "Offizielle Version verwenden", it: "Usa la versione ufficiale");
         let later = later_title();
         #[derive(Clone, Copy, PartialEq, Eq)]
@@ -122,10 +123,10 @@ impl Controller {
         let choice = ui::alert(
             &tr!(en: "{title} conflicts with your changes", ja: "{title} とあなたの変更が衝突しました", de: "{title} steht im Konflikt mit deinen Änderungen", it: "{title} è in conflitto con le tue modifiche"),
             &tr!(
-                en: "Conflicting files:\n{list}\n\n“{resolve}”: Claude Code fixes them so that both are kept.\n“{official}”: your changes are set aside; you can get them back from refs/heads/before/{release} and from the versions kept.\n“{later}”: keep using the current version. You'll be asked again next time.",
-                ja: "衝突したファイル:\n{list}\n\n「{resolve}」: Claude Code が両方を残すように直します。\n「{official}」: あなたの変更を外します。外した変更は refs/heads/before/{release} と残っているバージョンから戻せます。\n「{later}」: いまのバージョンを使い続けます。次回また聞きます。",
-                de: "Dateien mit Konflikten:\n{list}\n\n„{resolve}“: Claude Code korrigiert sie so, dass beides erhalten bleibt.\n„{official}“: Deine Änderungen werden beiseitegelegt; du kannst sie aus refs/heads/before/{release} und den aufbewahrten Versionen zurückholen.\n„{later}“: Die aktuelle Version wird weiter verwendet. Beim nächsten Mal wirst du wieder gefragt.",
-                it: "File in conflitto:\n{list}\n\n“{resolve}”: Claude Code li corregge in modo da tenere entrambe le parti.\n“{official}”: le tue modifiche vengono messe da parte; puoi recuperarle da refs/heads/before/{release} e dalle versioni conservate.\n“{later}”: continui a usare la versione attuale. Ti verrà chiesto di nuovo la prossima volta.",
+                en: "Conflicting files:\n{list}\n\n“{resolve}”: {name} fixes them so that both are kept.\n“{official}”: your changes are set aside; you can get them back from refs/heads/before/{release} and from the versions kept.\n“{later}”: keep using the current version. You'll be asked again next time.",
+                ja: "衝突したファイル:\n{list}\n\n「{resolve}」: {name} が両方を残すように直します。\n「{official}」: あなたの変更を外します。外した変更は refs/heads/before/{release} と残っているバージョンから戻せます。\n「{later}」: いまのバージョンを使い続けます。次回また聞きます。",
+                de: "Dateien mit Konflikten:\n{list}\n\n„{resolve}“: {name} korrigiert sie so, dass beides erhalten bleibt.\n„{official}“: Deine Änderungen werden beiseitegelegt; du kannst sie aus refs/heads/before/{release} und den aufbewahrten Versionen zurückholen.\n„{later}“: Die aktuelle Version wird weiter verwendet. Beim nächsten Mal wirst du wieder gefragt.",
+                it: "File in conflitto:\n{list}\n\n“{resolve}”: {name} li corregge in modo da tenere entrambe le parti.\n“{official}”: le tue modifiche vengono messe da parte; puoi recuperarle da refs/heads/before/{release} e dalle versioni conservate.\n“{later}”: continui a usare la versione attuale. Ti verrà chiesto di nuovo la prossima volta.",
             ),
             &buttons,
         );
@@ -134,7 +135,7 @@ impl Controller {
             let requests = self.requests_since(repo, main, upstream);
             let notes = self.shipped.release.notes.clone();
             let combining = tr!(en: "Combining with {title}", ja: "{title} と合わせています", de: "Zusammenführen mit {title}", it: "Unione con {title}");
-            let assistant = found.expect("the button is shown only when Claude Code was found");
+            let assistant = found.expect("the button is shown only when there is an assistant");
             // The job writes the merge into the work tree.
             self.keep_hand_edits(repo);
             self.start_job(

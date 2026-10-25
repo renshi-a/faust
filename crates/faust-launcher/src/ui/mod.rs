@@ -592,9 +592,11 @@ pub(crate) fn alert_remote(id: &str, title: &str, text: &str, buttons: &[&str], 
     })
 }
 
-/// Asks for a few lines of text. `None` when the second button (cancel) was pressed.
-pub(crate) fn ask_text(title: &str, text: &str, ok: &str, cancel: &str) -> Option<String> {
+/// Asks for a few lines of text, starting from `initial`. `None` when the second button
+/// (cancel) was pressed.
+pub(crate) fn ask_text(title: &str, text: &str, initial: &str, ok: &str, cancel: &str) -> Option<String> {
     let (title, text, buttons) = (title.to_owned(), text.to_owned(), vec![ok.to_owned(), cancel.to_owned()]);
+    let initial = initial.to_owned();
     on_main(move || {
         let a = new_alert(&title, &text, &buttons, false);
         // SAFETY: an NSScrollView holding an NSTextView, set as the alert's accessory view.
@@ -609,6 +611,7 @@ pub(crate) fn ask_text(title: &str, text: &str, ok: &str, cancel: &str) -> Optio
             let _: () = msg_send![&*tv, setAutoresizingMask: 2usize];
             let font: Id = msg_send![class!(NSFont), systemFontOfSize: 13.0f64];
             let _: () = msg_send![&*tv, setFont: &*font];
+            let _: () = msg_send![&*tv, setString: &*nsstring(&initial)];
             let _: () = msg_send![&*sv, setDocumentView: &*tv];
             let _: () = msg_send![&*a, setAccessoryView: &*sv];
             let _: () = msg_send![&*a, layout];

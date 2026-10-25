@@ -4,8 +4,10 @@ This guide makes a small app, builds it without Xcode, opens it the way a user w
 it by asking, breaks it on purpose to watch Faust roll it back, and ends with a release you
 can hand out. It takes about fifteen minutes.
 
-You need an Apple silicon Mac with macOS 11 or later, [rustup](https://rustup.rs), git, and
-[Claude Code](https://claude.com/claude-code) (signed in) for the change steps.
+You need an Apple silicon Mac with macOS 11 or later, [rustup](https://rustup.rs), git, and,
+for the change steps, [Claude Code](https://claude.com/claude-code) (signed in) or a model
+behind an OpenAI-compatible API, such as one you run with [Ollama](https://ollama.com) or
+[LM Studio](https://lmstudio.ai).
 
 ## 1. Install Faust
 
@@ -28,7 +30,7 @@ cd "Happy Day"
 Happy Day/
 ├── Cargo.toml       an ordinary Rust package, plus faust-link
 ├── faust.toml       who the app is, and how Faust builds and checks it
-├── FAUST.md         the rules Claude Code follows when it changes the app
+├── FAUST.md         the rules the assistant follows when it changes the app
 └── src/main.rs      one window, and a menu with "Request a Change…"
 ```
 
@@ -89,12 +91,15 @@ In the app, choose **Happy Day ▸ Request a Change…** and write what you want
 
 > Make the greeting say good morning, and show today's date under it.
 
-Faust shows the request, what Claude Code may touch, and what it can do, and asks before
-anything starts. Then a panel shows Claude Code at work: the files it reads and edits. When it
+Faust shows the request, which assistant will make it, what it may touch, and what it can do,
+and asks before anything starts. **Another Assistant…** switches to a different one: Claude
+Code, or a model at an address you give, such as `http://localhost:11434/v1` for Ollama. Faust
+lists that server's models and remembers your pick. Then a panel shows the assistant at work:
+the files it reads and edits. When it
 is done, Faust builds the new version, runs the tests and `--selftest`, and asks whether to
 switch. **Show Changes** opens the diff. Switch, and the app restarts as the new version.
 
-If the build fails, Faust sends the end of the log back to Claude Code and lets it try again,
+If the build fails, Faust sends the end of the log back to the assistant and lets it try again,
 twice at most. You are only asked to switch to a version that passed.
 
 ## 6. Break it, and watch it come back
@@ -124,7 +129,7 @@ git log --oneline --graph --all
 
 Change the app yourself, commit, and run `faust dev` again. The new working tree arrives as an
 *official update*. Faust merges it with the changes "the user" (you, a moment ago) asked for:
-cleanly when you touched different lines, with Claude Code's help when you didn't. In
+cleanly when you touched different lines, with the assistant's help when you didn't. In
 `faust dev` the update is taken without asking; a user is asked first.
 
 ## 9. Release

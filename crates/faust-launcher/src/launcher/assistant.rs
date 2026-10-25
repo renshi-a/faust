@@ -1,18 +1,21 @@
-//! The coding assistant that changes the source: Claude Code, for now.
+//! The coding assistant that changes the source: Claude Code, or a model Faust runs itself
+//! (see `model.rs`), whichever the user chose.
 //!
-//! It may only read, edit, write and search files in the user's repository. It runs in
-//! Claude Code's restricted mode, which ignores every settings file (the user's, and any the
+//! Either may only read, edit, write and search files in the user's repository. Claude Code
+//! runs in its restricted mode, which ignores every settings file (the user's, and any the
 //! repository holds, since the repository may have been rewritten) and confines the file tools
-//! to the working directory; hooks are off and there are no MCP servers. Building and testing
-//! are the launcher's job.
+//! to the working directory; hooks are off and there are no MCP servers. A model gets only the
+//! tools Faust carries out itself. Building and testing are the launcher's job.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::model::{self, Endpoint};
 use crate::proc::{self, Limits, Output};
 
 /// One run may take this long.
@@ -21,19 +24,82 @@ const TOOLS: &str = "Read,Edit,Write,Glob,Grep";
 /// Settings given on the command line, which restricted mode still applies.
 const SETTINGS: &str = r#"{"disableAllHooks":true}"#;
 
-/// An installed Claude Code.
+/// The assistant that makes the changes.
 #[derive(Debug, Clone)]
 pub(crate) struct Assistant {
-    pub(crate) path: PathBuf,
+    /// What commit messages name it by: "2.1.300 (Claude Code)", "qwen3-coder (localhost:11434)".
     pub(crate) version: String,
-    /// Has `--restricted`. Faust doesn't run a Claude Code without it.
-    pub(crate) restricted: bool,
+    pub(crate) backend: Backend,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum Backend {
+    /// An installed Claude Code.
+    ClaudeCode {
+        path: PathBuf,
+        /// Has `--restricted`. Faust doesn't run a Claude Code without it.
+        restricted: bool,
+    },
+    /// A model behind an OpenAI-compatible API, with Faust's own tools.
+    Model(Endpoint),
 }
 
 impl Assistant {
-    /// "2.1.300 (Claude Code) (~/.local/bin/claude)", for showing.
+    pub(crate) fn model(e: Endpoint) -> Assistant {
+        Assistant { version: format!("{} ({})", e.model, e.host()), backend: Backend::Model(e) }
+    }
+
+    /// "Claude Code", or the model's name, for sentences.
+    pub(crate) fn name(&self) -> &str {
+        match &self.backend {
+            Backend::ClaudeCode { .. } => "Claude Code",
+            Backend::Model(e) => &e.model,
+        }
+    }
+
+    /// "2.1.300 (Claude Code) (~/.local/bin/claude)", "qwen3-coder (http://localhost:11434/v1)",
+    /// for showing.
     pub(crate) fn title(&self) -> String {
-        format!("{} ({})", self.version, super::paths::Paths::tilde(&self.path))
+        match &self.backend {
+            Backend::ClaudeCode { path, .. } => format!("{} ({})", self.version, super::paths::Paths::tilde(path)),
+            Backend::Model(e) => format!("{} ({})", e.model, e.url),
+        }
+    }
+
+    /// A Claude Code without restricted mode, which Faust doesn't run.
+    pub(crate) fn too_old(&self) -> bool {
+        matches!(self.backend, Backend::ClaudeCode { restricted: false, .. })
+    }
+}
+
+/// Which assistant the user chose, kept in `faust/assistant.json`. Without one, Claude Code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub(crate) enum Choice {
+    ClaudeCode,
+    Model(Endpoint),
+}
+
+pub(crate) fn load(file: &Path) -> Option<Choice> {
+    serde_json::from_slice(&std::fs::read(file).ok()?).ok()
+}
+
+/// Saves the choice where only this user can read it: it may hold an API key.
+pub(crate) fn save(file: &Path, choice: &Choice) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let tmp = file.with_extension("json.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    f.write_all(&serde_json::to_vec_pretty(choice).map_err(std::io::Error::other)?)?;
+    std::fs::rename(tmp, file)
+}
+
+/// The assistant the user chose, or else Claude Code if it is installed.
+pub(crate) fn chosen(file: &Path) -> Option<Assistant> {
+    match load(file) {
+        Some(Choice::Model(e)) => Some(Assistant::model(e)),
+        _ => find(),
     }
 }
 
@@ -66,7 +132,7 @@ pub(crate) fn find() -> Option<Assistant> {
         }
         let help = Command::new(&path).arg("--help").env("PATH", search_path()).output().ok()?;
         let restricted = String::from_utf8_lossy(&help.stdout).contains("--restricted");
-        Some(Assistant { path, version, restricted })
+        Some(Assistant { version, backend: Backend::ClaudeCode { path, restricted } })
     })
 }
 
@@ -99,7 +165,16 @@ pub(crate) struct Outcome {
     /// What it says it changed, in the user's language.
     pub(crate) summary: String,
     /// To continue the same conversation (after a failed build).
-    pub(crate) session: Option<String>,
+    pub(crate) session: Option<Session>,
+}
+
+/// A conversation to continue.
+#[derive(Debug, Clone)]
+pub(crate) enum Session {
+    /// Claude Code's session id.
+    ClaudeCode(String),
+    /// The messages so far.
+    Model(Vec<Value>),
 }
 
 /// The facts every prompt starts from.
@@ -157,10 +232,43 @@ impl Brief {
     }
 }
 
-/// `claude -p` with the prompt on stdin; events come back as JSON lines and the last one is
-/// the result. `on_log` gets what it is doing as it goes (files read and changed, what it says).
+/// Runs the assistant in `cwd` (the repository), continuing `resume` if given. `on_log` gets
+/// what it is doing as it goes (files read and changed, what it says).
 pub(crate) fn run(
     a: &Assistant,
+    cwd: &Path,
+    prompt: &str,
+    resume: Option<Session>,
+    log: &Path,
+    limits: Limits<'_>,
+    on_log: &mut dyn FnMut(&str),
+) -> Result<Outcome> {
+    match &a.backend {
+        Backend::ClaudeCode { path, restricted } => {
+            if !restricted {
+                bail!(outdated(&a.version));
+            }
+            let id = match resume {
+                Some(Session::ClaudeCode(id)) => Some(id),
+                _ => None,
+            };
+            claude(path, cwd, prompt, id.as_deref(), log, limits, on_log)
+        }
+        Backend::Model(e) => {
+            let history = match resume {
+                Some(Session::Model(m)) => m,
+                _ => Vec::new(),
+            };
+            let (summary, messages) = model::run(e, cwd, prompt, history, log, limits, on_log)?;
+            Ok(Outcome { summary, session: Some(Session::Model(messages)) })
+        }
+    }
+}
+
+/// `claude -p` with the prompt on stdin; events come back as JSON lines and the last one is
+/// the result.
+fn claude(
+    path: &Path,
     cwd: &Path,
     prompt: &str,
     resume: Option<&str>,
@@ -168,10 +276,7 @@ pub(crate) fn run(
     limits: Limits<'_>,
     on_log: &mut dyn FnMut(&str),
 ) -> Result<Outcome> {
-    let mut cmd = Command::new(&a.path);
-    if !a.restricted {
-        bail!(outdated(&a.version));
-    }
+    let mut cmd = Command::new(path);
     cmd.arg("-p")
         .args(["--output-format", "stream-json", "--verbose"])
         .arg("--restricted")
@@ -221,15 +326,7 @@ fn describe(line: &str, cwd: &Path) -> Vec<String> {
                     Some("tool_use") => {
                         let input = &c["input"];
                         let path = rel(input["file_path"].as_str().or(input["path"].as_str()).unwrap_or(""));
-                        let pattern = s(&input["pattern"]);
-                        out.push(match c["name"].as_str().unwrap_or("?") {
-                            "Read" => tr!(en: "Read {path}", ja: "読む: {path}", de: "Lesen: {path}", it: "Lettura: {path}"),
-                            "Edit" => tr!(en: "Edit {path}", ja: "編集: {path}", de: "Bearbeiten: {path}", it: "Modifica: {path}"),
-                            "Write" => tr!(en: "Write {path}", ja: "書き込み: {path}", de: "Schreiben: {path}", it: "Scrittura: {path}"),
-                            "Glob" | "Grep" if path.is_empty() => tr!(en: "Search {pattern}", ja: "検索: {pattern}", de: "Suchen: {pattern}", it: "Ricerca: {pattern}"),
-                            "Glob" | "Grep" => tr!(en: "Search {pattern} in {path}", ja: "検索: {pattern}（{path}）", de: "Suchen: {pattern} in {path}", it: "Ricerca: {pattern} in {path}"),
-                            other => other.to_owned(),
-                        });
+                        out.push(tool_line(c["name"].as_str().unwrap_or("?"), &path, input["pattern"].as_str().unwrap_or("")));
                     }
                     _ => {}
                 }
@@ -254,7 +351,26 @@ fn describe(line: &str, cwd: &Path) -> Vec<String> {
     out
 }
 
-fn short(s: &str, n: usize) -> String {
+/// A tool call, by Claude Code's name for the tool, as a line for the progress log.
+pub(super) fn tool_line(name: &str, path: &str, pattern: &str) -> String {
+    match name {
+        "Read" => tr!(en: "Read {path}", ja: "読む: {path}", de: "Lesen: {path}", it: "Lettura: {path}"),
+        "Edit" => tr!(en: "Edit {path}", ja: "編集: {path}", de: "Bearbeiten: {path}", it: "Modifica: {path}"),
+        "Write" => tr!(en: "Write {path}", ja: "書き込み: {path}", de: "Schreiben: {path}", it: "Scrittura: {path}"),
+        "Glob" | "Grep" if pattern.is_empty() => {
+            tr!(en: "List {path}", ja: "一覧: {path}", de: "Auflisten: {path}", it: "Elenco: {path}")
+        }
+        "Glob" | "Grep" if path.is_empty() => {
+            tr!(en: "Search {pattern}", ja: "検索: {pattern}", de: "Suchen: {pattern}", it: "Ricerca: {pattern}")
+        }
+        "Glob" | "Grep" => {
+            tr!(en: "Search {pattern} in {path}", ja: "検索: {pattern}（{path}）", de: "Suchen: {pattern} in {path}", it: "Ricerca: {pattern} in {path}")
+        }
+        other => other.to_owned(),
+    }
+}
+
+pub(super) fn short(s: &str, n: usize) -> String {
     if s.chars().count() <= n { s.to_owned() } else { s.chars().take(n).collect::<String>() + "…" }
 }
 
@@ -285,7 +401,7 @@ fn parse(out: &str) -> Result<Outcome> {
         }
         bail!(summary);
     }
-    Ok(Outcome { summary, session: result["session_id"].as_str().map(str::to_owned) })
+    Ok(Outcome { summary, session: result["session_id"].as_str().map(|id| Session::ClaudeCode(id.to_owned())) })
 }
 
 #[cfg(test)]
@@ -298,7 +414,8 @@ mod tests {
             "{\"type\":\"result\",\"is_error\":false,\"result\":\" Made the eyes bigger \",\"session_id\":\"abc\"}\n",
         )
         .unwrap();
-        assert_eq!((o.summary.as_str(), o.session.as_deref()), ("Made the eyes bigger", Some("abc")));
+        assert_eq!(o.summary, "Made the eyes bigger");
+        assert!(matches!(o.session, Some(Session::ClaudeCode(id)) if id == "abc"));
         assert!(parse("{\"type\":\"result\",\"is_error\":true,\"result\":\"limit\"}").is_err());
         assert!(parse("nothing").is_err());
         let stream = "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"m\"}\n{\"type\":\"result\",\"is_error\":false,\"result\":\"ok\",\"session_id\":\"s\"}\n";
@@ -329,6 +446,22 @@ mod tests {
             d(r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"1 fn main"}]}}"#).is_empty()
         );
         assert_eq!(d("warning: x"), ["warning: x"]);
+    }
+
+    #[test]
+    fn keeps_the_choice_private() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let file = std::env::temp_dir().join(format!("faust-assistant-{}.json", std::process::id()));
+        assert!(load(&file).is_none());
+        let e = Endpoint { url: "http://localhost:11434/v1".into(), model: "qwen3-coder".into(), key: "k".into() };
+        save(&file, &Choice::Model(e.clone())).unwrap();
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(load(&file), Some(Choice::Model(e)));
+        let a = chosen(&file).unwrap();
+        assert_eq!((a.name(), a.version.as_str()), ("qwen3-coder", "qwen3-coder (localhost:11434)"));
+        save(&file, &Choice::ClaudeCode).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap().trim(), "{\n  \"kind\": \"claude-code\"\n}");
+        let _ = std::fs::remove_file(file);
     }
 
     #[test]

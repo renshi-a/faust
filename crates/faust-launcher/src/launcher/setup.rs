@@ -70,10 +70,10 @@ impl Controller {
         let description = self.shipped.config.description();
         let intro = if description.is_empty() { String::new() } else { format!("{description}\n\n") };
         let welcome = tr!(
-            en: "{intro}{app} can change itself. When you ask for a change, Claude Code rewrites {app}'s source and a new version is built right on this Mac. It is used only if it builds, passes its tests and you agree, and you can always go back.\n\nThis installer puts what that needs on this Mac and builds the first version. It takes a few minutes.\n\nClick “Continue” to see what will be installed. Nothing is installed yet.",
-            ja: "{intro}{app} は自分自身を変えられるアプリです。変更を頼むと、Claude Code が {app} のソースを書き換え、この Mac の上で新しいバージョンをビルドします。ビルドとテストが通り、あなたが同意したときだけ使われ、いつでも前のバージョンに戻せます。\n\nこのインストーラは、そのために必要なものをこの Mac に入れて、最初のバージョンをビルドします。数分かかります。\n\n「続ける」をクリックすると、インストールするものを確認できます。まだ何もインストールしません。",
-            de: "{intro}{app} kann sich selbst ändern. Wenn du um eine Änderung bittest, schreibt Claude Code den Quellcode von {app} um, und direkt auf diesem Mac wird eine neue Version gebaut. Sie wird nur verwendet, wenn sie sich bauen lässt, ihre Tests besteht und du zustimmst, und du kannst jederzeit zurück.\n\nDieses Installationsprogramm installiert, was dafür nötig ist, und baut die erste Version. Das dauert ein paar Minuten.\n\nKlicke auf „Fortfahren“, um zu sehen, was installiert wird. Noch wird nichts installiert.",
-            it: "{intro}{app} può cambiare se stessa. Quando chiedi una modifica, Claude Code riscrive il codice sorgente di {app} e una nuova versione viene compilata direttamente su questo Mac. Viene usata solo se si compila, supera i test e tu sei d'accordo, e puoi sempre tornare indietro.\n\nQuesto programma di installazione mette su questo Mac ciò che serve e compila la prima versione. Ci vorranno alcuni minuti.\n\nFai clic su “Continua” per vedere cosa verrà installato. Per ora non viene installato nulla.",
+            en: "{intro}{app} can change itself. When you ask for a change, an assistant (Claude Code, or a model you choose) rewrites {app}'s source and a new version is built right on this Mac. It is used only if it builds, passes its tests and you agree, and you can always go back.\n\nThis installer puts what that needs on this Mac and builds the first version. It takes a few minutes.\n\nClick “Continue” to see what will be installed. Nothing is installed yet.",
+            ja: "{intro}{app} は自分自身を変えられるアプリです。変更を頼むと、アシスタント（Claude Code か、あなたが選んだモデル）が {app} のソースを書き換え、この Mac の上で新しいバージョンをビルドします。ビルドとテストが通り、あなたが同意したときだけ使われ、いつでも前のバージョンに戻せます。\n\nこのインストーラは、そのために必要なものをこの Mac に入れて、最初のバージョンをビルドします。数分かかります。\n\n「続ける」をクリックすると、インストールするものを確認できます。まだ何もインストールしません。",
+            de: "{intro}{app} kann sich selbst ändern. Wenn du um eine Änderung bittest, schreibt ein Assistent (Claude Code oder ein Modell deiner Wahl) den Quellcode von {app} um, und direkt auf diesem Mac wird eine neue Version gebaut. Sie wird nur verwendet, wenn sie sich bauen lässt, ihre Tests besteht und du zustimmst, und du kannst jederzeit zurück.\n\nDieses Installationsprogramm installiert, was dafür nötig ist, und baut die erste Version. Das dauert ein paar Minuten.\n\nKlicke auf „Fortfahren“, um zu sehen, was installiert wird. Noch wird nichts installiert.",
+            it: "{intro}{app} può cambiare se stessa. Quando chiedi una modifica, un assistente (Claude Code o un modello a tua scelta) riscrive il codice sorgente di {app} e una nuova versione viene compilata direttamente su questo Mac. Viene usata solo se si compila, supera i test e tu sei d'accordo, e puoi sempre tornare indietro.\n\nQuesto programma di installazione mette su questo Mac ciò che serve e compila la prima versione. Ci vorranno alcuni minuti.\n\nFai clic su “Continua” per vedere cosa verrà installato. Per ora non viene installato nulla.",
         );
         let place = Paths::tilde(&self.p.faust);
         let source = &self.shipped.release.version;
@@ -116,10 +116,10 @@ impl Controller {
                 )
             }
             None => tr!(
-                en: "Claude Code, which makes the changes: not found (you can install it later)",
-                ja: "変更を行う Claude Code: 見つかりません（あとからインストールできます）",
-                de: "Claude Code, das die Änderungen vornimmt: nicht gefunden (du kannst es später installieren)",
-                it: "Claude Code, che apporta le modifiche: non trovato (puoi installarlo più tardi)",
+                en: "Claude Code, which makes the changes: not found (install it later, or choose another model when you ask for a change)",
+                ja: "変更を行う Claude Code: 見つかりません（あとからインストールするか、変更を頼むときにほかのモデルを選べます）",
+                de: "Claude Code, das die Änderungen vornimmt: nicht gefunden (installiere es später oder wähle ein anderes Modell, wenn du um eine Änderung bittest)",
+                it: "Claude Code, che apporta le modifiche: non trovato (installalo più tardi o scegli un altro modello quando chiedi una modifica)",
             ),
         };
         let done = tr!(

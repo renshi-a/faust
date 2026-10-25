@@ -35,10 +35,10 @@ impl Controller {
         let mb = proc::dir_size(&support) >> 20;
         let folder = Paths::tilde(&support);
         let text = tr!(
-            en: "These will be deleted. This can't be undone.\n\n• The app: {bundle} (moved to the Trash)\n• Its folder: {folder} (about {mb} MB), with Rust, the versions that were built, the history of the changes you asked for, and the app's own data\n\nClaude Code and any other Rust on this Mac are left alone.",
-            ja: "次のものを削除します。元に戻せません。\n\n• アプリ: {bundle}（ゴミ箱に移動）\n• フォルダ: {folder}（約 {mb} MB）。Rust、ビルドしたバージョン、頼んだ変更の履歴、アプリ自身のデータが入っています\n\nClaude Code と、この Mac にあるほかの Rust には触れません。",
-            de: "Folgendes wird gelöscht. Das kann nicht rückgängig gemacht werden.\n\n• Die App: {bundle} (kommt in den Papierkorb)\n• Ihr Ordner: {folder} (etwa {mb} MB) mit Rust, den gebauten Versionen, dem Verlauf deiner Änderungswünsche und den eigenen Daten der App\n\nClaude Code und andere Rust-Installationen auf diesem Mac bleiben unberührt.",
-            it: "Verranno eliminati questi elementi. L'operazione non si può annullare.\n\n• L'app: {bundle} (spostata nel Cestino)\n• La sua cartella: {folder} (circa {mb} MB), con Rust, le versioni compilate, la cronologia delle modifiche richieste e i dati dell'app\n\nClaude Code e altre installazioni di Rust su questo Mac restano intatti.",
+            en: "These will be deleted. This can't be undone.\n\n• The app: {bundle} (moved to the Trash)\n• Its folder: {folder} (about {mb} MB), with Rust, the versions that were built, the history of the changes you asked for, and the app's own data\n\nClaude Code, your models and any other Rust on this Mac are left alone.",
+            ja: "次のものを削除します。元に戻せません。\n\n• アプリ: {bundle}（ゴミ箱に移動）\n• フォルダ: {folder}（約 {mb} MB）。Rust、ビルドしたバージョン、頼んだ変更の履歴、アプリ自身のデータが入っています\n\nClaude Code、モデル、この Mac にあるほかの Rust には触れません。",
+            de: "Folgendes wird gelöscht. Das kann nicht rückgängig gemacht werden.\n\n• Die App: {bundle} (kommt in den Papierkorb)\n• Ihr Ordner: {folder} (etwa {mb} MB) mit Rust, den gebauten Versionen, dem Verlauf deiner Änderungswünsche und den eigenen Daten der App\n\nClaude Code, deine Modelle und andere Rust-Installationen auf diesem Mac bleiben unberührt.",
+            it: "Verranno eliminati questi elementi. L'operazione non si può annullare.\n\n• L'app: {bundle} (spostata nel Cestino)\n• La sua cartella: {folder} (circa {mb} MB), con Rust, le versioni compilate, la cronologia delle modifiche richieste e i dati dell'app\n\nClaude Code, i tuoi modelli e altre installazioni di Rust su questo Mac restano intatti.",
         );
         let title = tr!(en: "Uninstall {app}?", ja: "{app} をアンインストールしますか？", de: "{app} deinstallieren?", it: "Disinstallare {app}?");
         let delete = tr!(en: "Uninstall", ja: "アンインストール", de: "Deinstallieren", it: "Disinstalla");

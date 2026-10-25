@@ -19,6 +19,8 @@ pub(crate) struct Paths {
     pub(crate) logs: PathBuf,
     pub(crate) state: PathBuf,
     pub(crate) devices: PathBuf,
+    /// The assistant the user chose (it may hold an API key).
+    pub(crate) assistant: PathBuf,
     /// Uses the developer's own rustup (`faust dev`) instead of installing one.
     pub(crate) system_rust: bool,
 }
@@ -45,6 +47,7 @@ impl Paths {
             logs: faust.join("logs"),
             state: faust.join("state.json"),
             devices: faust.join("devices.json"),
+            assistant: faust.join("assistant.json"),
             faust,
             support,
             system_rust,

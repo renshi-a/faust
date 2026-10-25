@@ -20,8 +20,8 @@ get the code for it, and many people build small apps for themselves this way. F
 the users of the apps you ship do the same.
 
 You ship the app as source, wrapped in Faust. A user asks for a change inside the app, and
-how they ask is part of the app, so they can change that too. Claude Code rewrites their
-copy, Faust builds and tests it, and they switch only if it passes and they agree. A version
+how they ask is part of the app, so they can change that too. Claude Code, or any model they
+choose (one on their own Mac included), rewrites their copy, Faust builds and tests it, and they switch only if it passes and they agree. A version
 that can't start is rolled back, and your updates are merged with their changes.
 
 Building needs no Xcode, on your Mac or theirs.
@@ -53,9 +53,9 @@ Building needs no Xcode, on your Mac or theirs.
 ```mermaid
 flowchart LR
     A[User asks for a change] --> B[Faust confirms it with the user]
-    B --> C[Claude Code edits the user's copy of the source]
+    B --> C[The assistant edits the user's copy of the source]
     C --> D{Build, tests, self-test}
-    D -- fail --> C2[Claude Code fixes it, twice at most] --> D
+    D -- fail --> C2[The assistant fixes it, twice at most] --> D
     D -- pass --> E[Faust asks: switch?]
     E -- yes --> F[New version starts]
     F -- can't start --> G[Back to the previous version]
@@ -67,21 +67,23 @@ flowchart LR
    source in a git repository and builds the first version.
 2. **Users ask for changes.** They ask through whatever the app offers, such as a menu item or
    a chat, and the app can suggest a change when it can tell what they want. Faust shows the
-   request and asks before anything happens. Claude Code may
-   only read, write and search files in the user's copy of the source.
+   request and asks before anything happens. The assistant, Claude Code or a model the user
+   chose, may only read, write and search files in the user's copy of the source.
 3. **Every version passes the same checks.** A sandboxed build with tripwires on every C and
    Xcode tool, the app's tests, and its self-test. Then the user decides, and a trial run
    decides again.
 4. **Old versions are kept.** Every version and every candidate is a commit. Going back is a
    menu item. Your updates are three-way merged with what the user changed, and when the merge
-   conflicts, Claude Code resolves it or the user's changes are set aside on a branch they can
+   conflicts, the assistant resolves it or the user's changes are set aside on a branch they can
    get back.
 
 The [architecture](docs/architecture.md) document walks through each step.
 
 ## Quick start
 
-You need an Apple silicon Mac, [rustup](https://rustup.rs) and, to try changes, [Claude Code](https://claude.com/claude-code).
+You need an Apple silicon Mac, [rustup](https://rustup.rs) and, to try changes,
+[Claude Code](https://claude.com/claude-code) or a model behind an OpenAI-compatible API
+(such as [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) on your Mac).
 
 ```sh
 cargo install --git https://github.com/renshi-a/faust faust-launcher   # the `faust` command
@@ -100,7 +102,7 @@ A repairable app is an ordinary Rust app with three additions.
 happy-day/
 ├── Cargo.toml       depends on faust-link
 ├── faust.toml       who the app is, and how to build and check it
-├── FAUST.md         the rules Claude Code follows when it changes the app
+├── FAUST.md         the rules the assistant follows when it changes the app
 └── src/main.rs
 ```
 
@@ -173,12 +175,14 @@ stage while the code uses no new system functions, so a one-line change rebuilds
 The source can be rewritten, so the rules that protect the user live in the signed launcher,
 and the app can't change the launcher.
 
-- **The user approves twice.** Before Claude Code starts, with the request in full; and before
+- **The user approves twice.** Before the assistant starts, with the request in full; and before
   switching, with the changes one click away.
 - **The assistant gets file tools only.** Claude Code runs in its restricted mode with only
   `Read`, `Edit`, `Write`, `Glob` and `Grep`. It has no shell, web, MCP servers, hooks or
-  settings files, including settings files a rewritten source could plant. Protected files
-  (`[repair] protect`) are put back if it touches them.
+  settings files, including settings files a rewritten source could plant. Any other model
+  gets tools that Faust carries out itself: list, read, search, write and edit files in the
+  repository, and nothing more. Protected files (`[repair] protect`) are put back if it
+  touches them.
 - **Building is sandboxed.** Build scripts, proc macros, tests and the self-test run under
   `sandbox-exec`, and may write only to the version's own folder, cargo's output and caches, and
   the temporary folders, never to the repository, the state or the other versions.
@@ -198,7 +202,7 @@ report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 | Mac | Apple silicon, macOS 11 or later | Apple silicon, macOS 11 or later |
 | Rust | rustup, with the release `faust.toml` pins | installed by Faust (about 540 MB) |
 | Xcode | only for `faust release` (`notarytool`, `stapler`) | not needed |
-| Claude Code | to try changes | to ask for changes |
+| An assistant | Claude Code, or a model with an OpenAI-compatible API, to try changes | the same, to ask for changes |
 | Disk | | about 3 GB free for the toolchain, crates and versions |
 
 ## Documentation
