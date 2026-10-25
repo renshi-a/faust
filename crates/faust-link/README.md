@@ -6,7 +6,7 @@ open the version list, and quit when asked. It has no dependencies.
 
 ```toml
 [dependencies]
-faust-link = { git = "https://github.com/renshi-a/faust", tag = "v0.2.0" }
+faust-link = { git = "https://github.com/renshi-a/faust", tag = "v0.3.0" }
 ```
 
 ```rust
