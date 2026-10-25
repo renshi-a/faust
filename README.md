@@ -13,15 +13,22 @@
 
 </div>
 
-Faust is a launcher you wrap around a Rust app. You ship the app as source. On the user's
-Mac, Faust builds it, starts it, and lets the user change it by asking: Claude Code rewrites
-the source, Faust builds and tests the new version, and the user switches to it only if
+Until now, people had to take the apps they used as they came. If something didn't fit the
+way they worked, they could ask the developer and wait. Coding assistants have changed what
+a user can do: someone who doesn't program can describe a change in plain words and get code
+that makes it. Many people already build small apps for themselves this way. Faust brings
+the same thing to the apps you ship, so your users can change them too.
+
+You wrap Faust around a Rust app and ship the app as source. When a user wants the app to
+work differently, they ask for it from the app's menu. Claude Code rewrites their copy of the
+source, Faust builds and tests the new version, and the user switches to it only if
 everything passes and they agree. If the new version can't start, Faust goes back to the
 last one that did. When you ship an update, it is merged with the user's own changes.
 
-Neither you nor your users need Xcode to build the app. Faust links with the `rust-lld` that
-ships with Rust, against a tiny SDK it writes itself. Only `faust release` uses Xcode, for
-`notarytool` and `stapler`.
+All of this happens on the user's Mac, so building can't depend on Xcode. Faust links with
+the `rust-lld` that ships with Rust, against a tiny SDK it writes itself. Neither you nor your
+users need Xcode to build the app; only `faust release` uses it, for `notarytool` and
+`stapler`.
 
 ```
 ┌─ Hello.app ─────────────────────────────────────────────────────────────┐
