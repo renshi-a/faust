@@ -3,9 +3,11 @@
 //! comes from the shipped `faust.toml`, not from the version's own, which may have been changed.
 //!
 //! The source may have been rewritten, and building runs code from it (build scripts, proc
-//! macros, the tests), so each step runs in the sandbox (see `sandbox.rs`).
+//! macros, the tests), so each step runs in the sandbox (see `sandbox.rs`). For the same
+//! reason a version builds in its own copy of cargo's output, made from the copy of the last
+//! version the user chose: what a candidate's build writes there goes with it if it isn't used.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Result, anyhow, bail};
@@ -73,15 +75,31 @@ pub(crate) fn run(
         ("RUSTUP_HOME", tc.rustup_home.as_os_str().to_owned()),
         ("RUSTUP_TOOLCHAIN", rust.into()),
         ("FAUST_LANG", crate::i18n::current().code().into()),
+        // Everything was fetched first; cargo's downloads are read-only from here on.
+        ("CARGO_NET_OFFLINE", "true".into()),
     ];
+    let target = target_of(dir);
     let project_args = |cmd: &mut Command| {
-        cmd.arg("--path").arg(dir).arg("--target-dir").arg(&p.target);
+        cmd.arg("--path").arg(dir).arg("--target-dir").arg(&target);
     };
+
+    progress(0.0, Step::Build, "cargo fetch");
+    toolchain::fetch(p, rust, dir, false, log, limits, &mut |_, l| progress(0.0, Step::Build, l)).map_err(|e| {
+        let (name, tail) = (Step::Build.name(), proc::tail(log, 40));
+        anyhow!(tr!(
+            en: "{name} failed: {e:#}\n\n{tail}",
+            ja: "{name}に失敗しました: {e:#}\n\n{tail}",
+            de: "{name} fehlgeschlagen: {e:#}\n\n{tail}",
+            it: "{name} non riuscito: {e:#}\n\n{tail}",
+        ))
+    })?;
+    copy_target(&p.target, &target);
 
     let mut steps: Vec<(Step, f64, Command, f64)> = Vec::new();
     let writable = Writable {
-        dirs: vec![dir.to_owned(), p.target.clone()],
+        dirs: vec![dir.to_owned()],
         cargo_home: p.cargo_home.clone(),
+        downloads: false,
         secret: vec![p.assistant.clone()],
     };
     let mut build = sandbox::command(&writable, &me);
@@ -136,4 +154,40 @@ pub(crate) fn run(
         bail!("the build did not make {}", config.executable(dir)?.display());
     }
     Ok(())
+}
+
+/// Where the version in `dir` builds.
+fn target_of(dir: &Path) -> PathBuf {
+    dir.join("target")
+}
+
+/// Starts `to` as a copy of `from`, so only what changed is built again. APFS clones the files,
+/// so this takes moments and little space. Without a copy the build starts from nothing.
+fn copy_target(from: &Path, to: &Path) {
+    if !from.is_dir() || to.exists() {
+        return;
+    }
+    let copied = Command::new("/bin/cp").arg("-c").arg("-R").arg(from).arg(to).status();
+    if !copied.is_ok_and(|s| s.success()) {
+        super::log(&format!("couldn't copy {} to {}; building from nothing", from.display(), to.display()));
+        let _ = std::fs::remove_dir_all(to);
+    }
+}
+
+/// The user chose the version in `dir`: its build output is the one later versions start
+/// from. The previous one goes.
+pub(crate) fn keep_target(p: &Paths, dir: &Path) {
+    let target = target_of(dir);
+    if !target.is_dir() {
+        return;
+    }
+    let old = p.target.with_extension("old");
+    let _ = std::fs::remove_dir_all(&old);
+    let _ = std::fs::rename(&p.target, &old);
+    if let Err(e) = std::fs::rename(&target, &p.target) {
+        super::log(&format!("couldn't keep the build output of {}: {e}", dir.display()));
+    }
+    std::thread::spawn(move || {
+        let _ = std::fs::remove_dir_all(old);
+    });
 }

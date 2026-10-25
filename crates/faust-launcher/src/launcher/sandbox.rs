@@ -2,9 +2,11 @@
 //! macros), and so do the tests and the self-test, before the user has agreed to use the
 //! version, so it runs under `sandbox-exec`:
 //!
-//! - it may write only to the version's own folder, cargo's output, cargo's download cache
-//!   (not its `bin`), and the temporary folders. The repository, `state.json`, the trusted
-//!   devices, other versions and the toolchain stay read-only;
+//! - it may write only to the version's own folder (its build cache included) and the
+//!   temporary folders. The repository, `state.json`, the trusted devices, other versions and
+//!   the toolchain stay read-only, and so do the crates cargo downloaded: those are fetched in
+//!   a step of their own, which runs no code from the source, so nothing a candidate builds
+//!   can change what later versions compile;
 //! - it may not read the assistant's settings, which may hold an API key;
 //! - it may not start the tools that hand work to processes outside the sandbox (`open`,
 //!   `osascript`, `launchctl`, …), nor reach LaunchServices or Apple Events.
@@ -34,13 +36,25 @@ const NO_LOOKUP: &[&str] = &[
     "com.apple.lsd.modifydb",
 ];
 
+/// Files in cargo's home that a build writes although it downloads nothing.
+const CARGO_LOCKS: &[&str] = &[
+    ".package-cache",
+    ".package-cache-mutate",
+    ".global-cache",
+    ".global-cache-journal",
+    ".global-cache-wal",
+    ".global-cache-shm",
+];
+
 /// Where sandboxed code may write.
 #[derive(Debug, Clone)]
 pub(crate) struct Writable {
     /// Folders it may write anywhere in.
     pub(crate) dirs: Vec<PathBuf>,
-    /// Cargo's home: writable for downloads, except its `bin`.
+    /// Cargo's home: only its lock files may be written, or (`downloads`) everything but its
+    /// `bin`, for fetching crates.
     pub(crate) cargo_home: PathBuf,
+    pub(crate) downloads: bool,
     /// Files it may not even read.
     pub(crate) secret: Vec<PathBuf>,
 }
@@ -54,15 +68,21 @@ fn quoted(p: &Path) -> String {
 /// The SBPL profile for `writable`.
 pub(crate) fn profile(writable: &Writable) -> String {
     let dirs: Vec<String> = writable.dirs.iter().map(|d| format!("(subpath {})", quoted(d))).collect();
-    let cargo = quoted(&writable.cargo_home);
-    let cargo_bin = quoted(&writable.cargo_home.join("bin"));
+    let cargo = if writable.downloads {
+        let (home, bin) = (quoted(&writable.cargo_home), quoted(&writable.cargo_home.join("bin")));
+        format!("(require-all (subpath {home}) (require-not (subpath {bin})))")
+    } else {
+        // Cargo takes these locks (and keeps its cache tracker) even when it downloads nothing.
+        let home = writable.cargo_home.canonicalize().unwrap_or_else(|_| writable.cargo_home.clone());
+        CARGO_LOCKS.iter().map(|f| format!("(literal {})", quoted(&home.join(f)))).collect::<Vec<_>>().join(" ")
+    };
     let exec: Vec<String> = NO_EXEC.iter().map(|p| format!("(literal \"{p}\")")).collect();
     let lookup: Vec<String> = NO_LOOKUP.iter().map(|n| format!("(global-name \"{n}\")")).collect();
     let secret: String =
         writable.secret.iter().map(|f| format!("(deny file-read* (literal {}))\n", quoted(f))).collect();
     format!(
         "(version 1)\n(allow default)\n\
-         (deny file-write* (require-not (require-any {} (require-all (subpath {cargo}) (require-not (subpath {cargo_bin}))) \
+         (deny file-write* (require-not (require-any {} {cargo} \
          (subpath \"/private/tmp\") (subpath \"/private/var/folders\") (subpath \"/dev\"))))\n\
          (deny process-exec {})\n(deny mach-lookup {})\n{secret}",
         dirs.join(" "),
@@ -101,7 +121,12 @@ mod tests {
         std::fs::create_dir_all(cargo.join("registry")).unwrap();
         let secret = base.join("assistant.json");
         std::fs::write(&secret, "key").unwrap();
-        let writable = Writable { dirs: vec![inside.clone()], cargo_home: cargo.clone(), secret: vec![secret.clone()] };
+        let mut writable = Writable {
+            dirs: vec![inside.clone()],
+            cargo_home: cargo.clone(),
+            downloads: true,
+            secret: vec![secret.clone()],
+        };
         let home = std::env::var("HOME").unwrap();
         let outside = format!("{home}/.faust-sandbox-test-{}", std::process::id());
         let script = format!(
@@ -116,6 +141,16 @@ mod tests {
         assert!(inside.join("a").is_file() && cargo.join("registry/b").is_file());
         assert!(!cargo.join("bin/cargo").exists());
         assert!(!Path::new(&outside).exists());
+
+        // Building: the downloads are read-only, cargo's locks aren't.
+        writable.downloads = false;
+        let script = format!(
+            "echo x > '{0}/.package-cache' && ! echo x > '{0}/registry/b' 2>/dev/null && ! echo x > '{0}/config.toml' 2>/dev/null",
+            cargo.display()
+        );
+        let ok = command(&writable, Path::new("/bin/sh")).args(["-c", &script]).status().unwrap();
+        assert!(ok.success(), "{}", profile(&writable));
+        assert_eq!(std::fs::read_to_string(cargo.join("registry/b")).unwrap(), "x\n");
         let _ = std::fs::remove_dir_all(base);
     }
 }

@@ -165,7 +165,7 @@ impl Controller {
         self.import_shipped()?;
 
         let fetching = tr!(en: "Fetching the crates for the build", ja: "ビルドに使うクレートを取得しています", de: "Crates für den Build werden geladen", it: "Download dei crate per la compilazione");
-        toolchain::fetch(&self.p, &rust, &self.p.repo, limits, &mut |f, l| {
+        toolchain::fetch(&self.p, &rust, &self.p.repo, true, &self.p.log("setup.log"), limits, &mut |f, l| {
             setup::progress(at(51.0, 9.0, f), &fetching, l)
         })?;
 
@@ -189,6 +189,7 @@ impl Controller {
         .inspect_err(|_| {
             let _ = std::fs::copy(&build_log, self.p.log("setup.log"));
         })?;
+        checks::keep_target(&self.p, &dir);
         // Usually the official release; after a lost build folder, whatever main held.
         let (kind, title) = if repo.ref_id(UPSTREAM) == Some(main) {
             (Kind::Official, official_title(&self.shipped.release.version))

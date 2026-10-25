@@ -13,6 +13,7 @@ const FILES: &[(&str, &str)] = &[
     ("FAUST.md", include_str!("../templates/app/FAUST.md.tmpl")),
     (".gitignore", include_str!("../templates/app/gitignore.tmpl")),
     ("src/main.rs", include_str!("../templates/app/src/main.rs")),
+    ("src/composer.rs", include_str!("../templates/app/src/composer.rs")),
 ];
 
 /// The `faust-link` requirement new apps get: the release of this repository that matches
@@ -110,7 +111,7 @@ mod tests {
                 "Hello",
                 "hello",
                 "dev.faust.hello",
-                "{ path = \"../../crates/faust-link\", version = \"0.1\" }",
+                "{ path = \"../../crates/faust-link\", version = \"0.2\" }",
             );
             let got = std::fs::read_to_string(example.join(path)).unwrap();
             assert_eq!(got, want, "examples/hello/{path} differs from the template");

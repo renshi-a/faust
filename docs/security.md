@@ -36,22 +36,30 @@ removed from its environment. A Claude Code too old to have restricted mode isn'
 
 Any other model the user chooses gets no tools of its own: it asks for one of five (list,
 read, search, write and edit files), and Faust carries the call out. Paths are taken relative
-to the repository; a path out of it, one inside `.git`, and any symbolic link on the way are
-refused, and nothing larger than 2 MB is read. No tool runs a command or reaches the network.
+to the repository; a path out of it, one inside `.git` (spelled in any case, since the disk
+usually ignores it), and any symbolic link on the way are refused, and nothing larger than
+2 MB is read. No tool runs a command or reaches the network.
 Faust sends the requests itself, with `/usr/bin/curl`, only to the address the user typed. The
 API key is kept in `faust/assistant.json`, readable only by the user, out of the command line
 and the logs, and the build sandbox may not read it.
+
+Whichever assistant ran, Faust then compares `.git` with how it was before: a moved branch,
+a new hook or a changed `config` is put back, and an object that was rewritten fails the
+change, since history that changed underneath would never show in a diff.
 
 Paths listed in the shipped `[repair] protect` are restored after every run, whichever
 assistant ran, including when it resolves a conflicting update.
 
 **Building is sandboxed.** The build runs code from the source: build scripts, proc macros,
 tests and the app's self-test. That happens before the user agrees to use the version, so each
-step runs under `sandbox-exec`. It may write only to that version's own folder, cargo's
-output, cargo's download cache (not its `bin`) and the temporary folders. The repository, the
-state, the trusted devices, the other versions and the toolchain are read-only to it. It can't
-start `open`, `osascript`, `launchctl` and similar tools, nor reach LaunchServices or Apple
-Events, which would run work outside the sandbox. The crates are fetched in the same sandbox.
+step runs under `sandbox-exec`. It may write only to that version's own folder and the
+temporary folders. The repository, the state, the trusted devices, the other versions, the
+toolchain and the crates cargo downloaded are read-only to it. The crates are fetched first,
+in the same sandbox but in a step that runs no code from the source. Each version builds in
+its own copy of cargo's output, cloned from the version the user last chose, so a candidate
+that isn't used can't leave anything behind for later builds. It can't start `open`,
+`osascript`, `launchctl` and similar tools, nor reach LaunchServices or Apple Events, which
+would run work outside the sandbox.
 Whether the tests and the self-test run is decided by the shipped `faust.toml`, not by the
 version's own copy.
 

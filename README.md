@@ -77,8 +77,8 @@ flowchart LR
 ## Quick start
 
 You need an Apple silicon Mac, [rustup](https://rustup.rs) and an AI model to try changes:
-[Claude Code](https://claude.com/claude-code), or one behind an OpenAI-compatible API such as
-[Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai).
+[Claude Code](https://claude.com/claude-code), ChatGPT or Gemini with an API key, or one behind an
+OpenAI-compatible API such as [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai).
 
 ```sh
 cargo install --git https://github.com/renshi-a/faust faust-launcher   # the `faust` command
@@ -86,9 +86,10 @@ faust new "Happy Day" && cd "Happy Day"                                # a small
 faust dev                           # builds it without Xcode and opens it the way a user would
 ```
 
-In the window that opens, choose **Happy Day ▸ Request a Change…** and ask for something, such
-as "make the text larger". To use a model other than Claude Code, choose **Another Assistant…**
-in the confirmation and enter its address (Ollama's is `http://localhost:11434/v1`).
+In the window that opens, type into the field at the bottom and ask for something, such as
+"make the text larger". To use a model other than Claude Code, click the assistant's name under
+the field (or **Another Assistant…** in the confirmation) and choose ChatGPT or Gemini, which
+need an API key, or another model by its address (Ollama's is `http://localhost:11434/v1`).
 
 ## What an app adds
 
@@ -127,9 +128,9 @@ if let Some(link) = faust_link::get() {
     link.ready();
 }
 
-// From a "Request a Change…" menu item:
+// From the field where the user asks for a change:
 if let Some(link) = faust_link::get() {
-    link.request_change(None);
+    link.request_change(Some("make the text larger"));
 }
 
 // In the event loop:

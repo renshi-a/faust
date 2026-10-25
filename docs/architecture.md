@@ -24,7 +24,7 @@ scripts/e2e.sh      the whole loop, without clicking
     state.json        the versions, which one is in use, which one is on trial
     repo/             the user's copy of the source: a git repository
     versions/0001/    each version's source, checked out and built
-    target/           cargo's output, shared by every version
+    target/           cargo's output for the version last chosen, which the next one starts from
     toolchain/        rustup and Rust
     logs/             launcher.log, app.log, and per version: <n>-build.log, <n>-assistant.log, <n>.diff
     devices.json      keys of devices the user trusts to answer confirmations
@@ -54,8 +54,10 @@ list of versions first.
 shows the request and asks. On yes, the assistant runs in the repository with its tools
 limited to reading, writing and searching files (see [the assistant](#the-assistant)). Faust commits the result on `try/<n>`, checks it out
 into `versions/<n>`, and runs the gate: the build, the tests and the self-test, each in the
-sandbox, where it may write only to `versions/<n>`, `target/`, cargo's caches and the
-temporary folders (see the [security model](security.md)). When the gate fails, the assistant
+sandbox, where it may write only to `versions/<n>` and the temporary folders (see the
+[security model](security.md)). The crates are fetched before that, and the build uses
+`versions/<n>/target`, an APFS clone of `target/`; when the user switches to the version,
+its copy becomes `target/`. When the gate fails, the assistant
 gets the end of the log and two more tries, in the same conversation. A candidate that passes is offered to the user with its diff; on yes, the app is
 asked to quit and the candidate starts *on trial*.
 
@@ -76,7 +78,9 @@ installed first, after asking.
 ## The assistant
 
 Two kinds of assistant can make a change, and the user picks one from the change dialog
-(**Another Assistant…**). Without a choice, Faust uses Claude Code when it is installed.
+(**Another Assistant…**) or from the app, which can only open that window (`assistant.choose`).
+ChatGPT and Gemini are offered by name: they are OpenAI-compatible APIs whose address Faust
+knows, so the user gives only a key. Without a choice, Faust uses Claude Code when it is installed.
 
 | | Claude Code | Any other model |
 |---|---|---|

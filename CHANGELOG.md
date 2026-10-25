@@ -3,7 +3,20 @@
 All notable changes to Faust are listed here. Faust follows [Semantic Versioning](https://semver.org);
 before 1.0, minor versions may change the configuration and the protocol.
 
-## 0.1.0 (unreleased)
+## 0.2.0 (unreleased)
+
+- Changes can be made by any model with an OpenAI-compatible API, not just Claude Code:
+  ChatGPT and Gemini by name with an API key, or a model at an address the user gives (Ollama,
+  LM Studio, OpenRouter, …). Faust carries out its five file tools itself.
+- The template asks for changes from a field at the bottom of its window instead of a menu
+  item, and shows who will make the change. How an app takes requests is the user's to change,
+  too.
+- Protocol: `assistant.choose` opens Faust's window for choosing the assistant, and Faust
+  sends `assistant` with the choice. `faust-link` 0.2 adds `Link::choose_assistant` and
+  `Event::Assistant`.
+- `faust dev` builds a new app first when it has no `Cargo.lock` yet.
+
+## 0.1.0 (2026-10-25)
 
 The first release.
 

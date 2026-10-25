@@ -1,5 +1,6 @@
 //! An assistant Faust runs itself, for any model behind an OpenAI-compatible chat API: one on
-//! this Mac (Ollama, LM Studio, llama.cpp, MLX, vLLM) or a hosted one (OpenAI, OpenRouter, …).
+//! this Mac (Ollama, LM Studio, llama.cpp, MLX, vLLM) or a hosted one (OpenAI, Gemini,
+//! OpenRouter, …).
 //!
 //! The model only asks for tools; Faust carries them out. They list, read, search, write and
 //! edit files in the repository, and nothing else: paths are relative to it, and a way out with
@@ -49,6 +50,56 @@ impl Endpoint {
         let rest = self.url.split_once("://").map_or(self.url.as_str(), |(_, r)| r);
         rest.split('/').next().unwrap_or(rest)
     }
+}
+
+/// A hosted service offered by name, so the user needs only a key.
+pub(crate) struct Service {
+    pub(crate) name: &'static str,
+    /// Its OpenAI-compatible API.
+    pub(crate) url: &'static str,
+    /// Where the user makes an API key.
+    pub(crate) keys: &'static str,
+}
+
+pub(crate) const SERVICES: &[Service] = &[
+    Service {
+        name: "ChatGPT (OpenAI)",
+        url: "https://api.openai.com/v1",
+        keys: "https://platform.openai.com/api-keys",
+    },
+    Service {
+        name: "Gemini (Google)",
+        url: "https://generativelanguage.googleapis.com/v1beta/openai",
+        keys: "https://aistudio.google.com/apikey",
+    },
+];
+
+/// The ids in a server's list that can hold a conversation. Hosted services list their
+/// models for embeddings, speech, images and video too; those are left out (unless nothing
+/// else is left). Gemini's ids lose their `models/`, which its API doesn't need.
+pub(crate) fn chat_models(ids: Vec<String>) -> Vec<String> {
+    const NOT_CHAT: &[&str] = &[
+        "embed",
+        "tts",
+        "whisper",
+        "transcribe",
+        "audio",
+        "realtime",
+        "dall-e",
+        "image",
+        "imagen",
+        "veo",
+        "sora",
+        "lyria",
+        "moderation",
+        "babbage",
+        "davinci",
+        "aqa",
+    ];
+    let ids: Vec<String> =
+        ids.into_iter().map(|id| id.strip_prefix("models/").map_or(id.clone(), str::to_owned)).collect();
+    let chat: Vec<String> = ids.iter().filter(|id| !NOT_CHAT.iter().any(|n| id.contains(n))).cloned().collect();
+    if chat.is_empty() { ids } else { chat }
 }
 
 /// The models the server lists, by id.
@@ -334,7 +385,8 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf> {
         match c {
             Component::CurDir => {}
             Component::Normal(part) => {
-                if part == ".git" {
+                // The disk is usually case-insensitive: `.GIT` is the same folder.
+                if part.eq_ignore_ascii_case(".git") {
                     bail!("{} is inside .git, which is off limits", given.display());
                 }
                 out.push(part);
@@ -362,7 +414,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<()> {
     for entry in std::fs::read_dir(dir)?.flatten() {
         let name = entry.file_name();
         let Ok(kind) = entry.file_type() else { continue };
-        if kind.is_dir() && name != ".git" && !(name == "target" && dir == root) {
+        if kind.is_dir() && !name.eq_ignore_ascii_case(".git") && !(name == "target" && dir == root) {
             walk(root, &entry.path(), out)?;
         } else if kind.is_file() {
             out.push(entry.path().strip_prefix(root).unwrap_or(&entry.path()).display().to_string());
@@ -433,9 +485,11 @@ fn request(e: &Endpoint, path: &str, body: Option<&Value>, log: &Path, limits: L
     let (text, code) = out.trim_end().rsplit_once('\n').unwrap_or(("", out.trim()));
     let answer: Value = serde_json::from_str(text).unwrap_or(Value::Null);
     if !code.starts_with('2') {
-        let why = answer["error"]["message"]
+        // Gemini puts its error in an array.
+        let error = if answer.is_array() { &answer[0]["error"] } else { &answer["error"] };
+        let why = error["message"]
             .as_str()
-            .or(answer["error"].as_str())
+            .or(error.as_str())
             .map_or_else(|| super::assistant::short(text.trim(), 300), str::to_owned);
         bail!(tr!(
             en: "The model at {url} answered {code}: {why}",
@@ -477,7 +531,7 @@ mod tests {
         assert_eq!(inside(&root, "src/../src/main.rs").unwrap(), root.join("src/main.rs"));
         assert_eq!(inside(&root, &root.join("src").display().to_string()).unwrap(), root.join("src"));
         assert_eq!(inside(&root, "").unwrap(), root);
-        for bad in ["../x", "src/../../x", "/etc/passwd", ".git/config", "src/.git/x"] {
+        for bad in ["../x", "src/../../x", "/etc/passwd", ".git/config", ".GIT/config", "src/.Git/x"] {
             assert!(inside(&root, bad).is_err(), "{bad}");
         }
         std::os::unix::fs::symlink("/tmp", root.join("out")).unwrap();
@@ -534,6 +588,20 @@ mod tests {
         assert_eq!(sent[1]["messages"].as_array().unwrap().len(), 4);
         assert_eq!(sent[0]["tools"].as_array().unwrap().len(), 5);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn lists_only_chat_models() {
+        let ids = [
+            "gpt-5",
+            "text-embedding-3-small",
+            "whisper-1",
+            "gpt-image-1",
+            "models/gemini-2.5-pro",
+            "models/imagen-4.0",
+        ];
+        assert_eq!(chat_models(ids.map(str::to_owned).to_vec()), ["gpt-5", "gemini-2.5-pro"]);
+        assert_eq!(chat_models(vec!["nomic-embed-text".into()]), ["nomic-embed-text"], "keeps a list it would empty");
     }
 
     #[test]

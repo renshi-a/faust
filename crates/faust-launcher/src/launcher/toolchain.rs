@@ -243,23 +243,29 @@ pub(crate) fn package_count(dir: &Path) -> usize {
     std::fs::read_to_string(dir.join("Cargo.lock")).map_or(40, |t| t.matches("[[package]]").count().max(1))
 }
 
-/// `cargo fetch --locked`: the crates the build needs, into `CARGO_HOME`.
+/// `cargo fetch`: the crates the build needs, into `CARGO_HOME`. `locked` for the shipped
+/// source, which must fetch exactly what it pins; a version's own `Cargo.lock` may be brought
+/// up to date (the assistant can add a dependency, but can't run cargo), so `dir` is writable.
 pub(crate) fn fetch(
     p: &Paths,
     rust: &str,
     dir: &Path,
+    locked: bool,
+    log: &Path,
     limits: Limits<'_>,
     progress: &mut dyn FnMut(f64, &str),
 ) -> Result<()> {
     let total = package_count(dir) as f64;
     // The source's build scripts don't run here, but cargo reads the source's configuration.
     let writable = super::sandbox::Writable {
-        dirs: Vec::new(),
+        dirs: if locked { Vec::new() } else { vec![dir.to_owned()] },
         cargo_home: p.cargo_home.clone(),
+        downloads: true,
         secret: vec![p.assistant.clone()],
     };
     let mut cmd = super::sandbox::command(&writable, &p.cargo_home.join("bin/cargo"));
-    cmd.args(["fetch", "--locked"])
+    cmd.arg("fetch")
+        .args(locked.then_some("--locked"))
         .current_dir(dir)
         .env_clear()
         .env("HOME", std::env::var_os("HOME").unwrap_or_default())
@@ -268,7 +274,7 @@ pub(crate) fn fetch(
         .env("RUSTUP_HOME", &p.rustup_home)
         .env("RUSTUP_TOOLCHAIN", rust);
     let mut n = 0.0;
-    proc::run(cmd, None, &p.log("setup.log"), limits, &mut |o| {
+    proc::run(cmd, None, log, limits, &mut |o| {
         if let Output::Line(l) = o {
             if l.trim_start().starts_with("Downloaded") {
                 n += 1.0;
