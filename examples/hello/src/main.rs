@@ -202,14 +202,14 @@ fn window(mtm: MainThreadMarker, target: &Target) -> Id {
         let _: () = msg_send![&*w, setTitle: &*nsstring("Hello")];
         let _: () = msg_send![&*w, setReleasedWhenClosed: Bool::NO];
         let content: Id = msg_send![&*w, contentView];
-        // The water fills what the field leaves above it.
-        let mut bottom = 0.0;
+        // The water fills the window, with the ball in the middle of what the field leaves.
+        let mut covered = 0.0;
         let field = faust_link::get().map(|_| composer::Composer::new(mtm, width - 40.0, "Ask Hello for a change"));
         if let Some(f) = &field {
             let r: Rect = msg_send![&**f, frame];
-            bottom = 20.0 + r.h;
+            covered = 20.0 + r.h;
         }
-        let water = water::WaterView::new(mtm, Rect { x: 0.0, y: bottom, w: width, h: height - bottom });
+        let water = water::WaterView::new(mtm, Rect { x: 0.0, y: 0.0, w: width, h: height }, covered);
         let _: () = msg_send![&*water, setAutoresizingMask: 18usize]; // grows with the window
         let _: () = msg_send![&*content, addSubview: &*water];
         if let Some(field) = field {

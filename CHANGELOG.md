@@ -6,7 +6,8 @@ before 1.0, minor versions may change the configuration and the protocol.
 ## Unreleased
 
 - The template's window shows a ball of water that ripples as the user types, instead of a
-  line of text.
+  line of text: a fluid simulated on the GPU and drawn with reflection and refraction, through
+  Metal, which needs no Xcode either.
 
 ## 0.2.0 (2026-10-25)
 
