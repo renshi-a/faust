@@ -1,7 +1,8 @@
-//! Water running over a small planet nobody sees, which ripples as the person types and follows
-//! the pointer. It starts as a wall of water that falls onto the planet and wraps around it. The
-//! water is simulated on the GPU with the material point method and drawn as a lit, refracting
-//! surface; the shaders are in `water.metal`, which Metal compiles when the app starts.
+//! Water running over a small dark planet, which ripples as the person types and follows the
+//! pointer. It starts as a wall of water that falls onto the planet and wraps around it. The
+//! water is simulated on the GPU with the material point method and drawn as glowing drops that
+//! streak as they move; the shaders are in `water.metal`, which Metal compiles when the app
+//! starts.
 //!
 //! Metal is part of every Mac. Like AppKit, it is loaded at run time and reached through
 //! Objective-C messages, so the build needs no SDK and no Xcode.
@@ -39,7 +40,7 @@ const THREADS: usize = 64;
 // Metal's enumerations, as the headers number them.
 const BGRA8_SRGB: usize = 81;
 const R32_FLOAT: usize = 55;
-const R16_FLOAT: usize = 25;
+const RGBA16_FLOAT: usize = 115;
 const DEPTH32_FLOAT: usize = 252;
 const LOAD_DONT_CARE: usize = 0;
 const LOAD_CLEAR: usize = 2;
@@ -117,9 +118,9 @@ struct Forces {
 /// the sea never quite settles.
 fn motion(t: f32) -> ([f32; 4], [f32; 4]) {
     let along = normalize([(t * 0.7).cos(), 0.6 * (t * 0.43).sin(), (t * 0.7).sin()]);
-    let tide = [along[0], along[1], along[2], 0.0025 * (0.6 + 0.4 * (t * 1.1).sin())];
+    let tide = [along[0], along[1], along[2], 0.0018 * (0.6 + 0.4 * (t * 1.1).sin())];
     let axis = normalize([(t * 0.23).sin(), 1.0, (t * 0.31).cos()]);
-    (tide, [axis[0], axis[1], axis[2], 0.011 * (t * 0.2).sin()])
+    (tide, [axis[0], axis[1], axis[2], 0.008 * (t * 0.2).sin()])
 }
 
 type Mat = [[f32; 4]; 4];
@@ -495,16 +496,18 @@ impl Fluid {
 struct Targets {
     size: (usize, usize),
     depth: Id,
-    smoothed: Id,
-    thickness: Id,
     zbuffer: Id,
+    glow: Id,
+    /// The bloom, a quarter of the size: blurred from one into the other and back.
+    bloom: [Id; 2],
 }
 
 struct Renderer {
     depth: Id,
-    thickness: Id,
+    glow: Id,
     composite: Id,
-    smooth: Id,
+    bloom_down: Id,
+    bloom_blur: Id,
     depth_test: Id,
     targets: RefCell<Option<Targets>>,
 }
@@ -520,15 +523,16 @@ impl Renderer {
         };
         Ok(Renderer {
             depth: gpu.render("sprite_vs", "depth_fs", R32_FLOAT, true, false)?,
-            thickness: gpu.render("sprite_vs", "thickness_fs", R16_FLOAT, false, true)?,
+            glow: gpu.render("glow_vs", "glow_fs", RGBA16_FLOAT, false, true)?,
             composite: gpu.render("full_vs", "composite_fs", BGRA8_SRGB, false, false)?,
-            smooth: gpu.compute("smooth")?,
+            bloom_down: gpu.compute("bloom_down")?,
+            bloom_blur: gpu.compute("bloom_blur")?,
             depth_test: depth_test.ok_or("no depth state")?,
             targets: RefCell::new(None),
         })
     }
 
-    /// The water's smoothed depth from the last frame drawn, if any.
+    /// The water's depth from the last frame drawn, if any.
     fn last_depth(&self) -> Option<Id> {
         self.targets.borrow().as_ref().map(|t| t.depth.clone())
     }
@@ -538,12 +542,13 @@ impl Renderer {
             return Ok(());
         }
         let (w, h) = size;
+        let (qw, qh) = (w.div_ceil(4), h.div_ceil(4));
         *self.targets.borrow_mut() = Some(Targets {
             size,
             depth: gpu.texture(R32_FLOAT, w, h)?,
-            smoothed: gpu.texture(R32_FLOAT, w, h)?,
-            thickness: gpu.texture(R16_FLOAT, w, h)?,
             zbuffer: gpu.texture(DEPTH32_FLOAT, w, h)?,
+            glow: gpu.texture(RGBA16_FLOAT, w, h)?,
+            bloom: [gpu.texture(RGBA16_FLOAT, qw, qh)?, gpu.texture(RGBA16_FLOAT, qw, qh)?],
         });
         Ok(())
     }
@@ -596,32 +601,32 @@ impl Renderer {
             let e = pass(&t.depth, Some(0.0), Some(&t.zbuffer));
             let _: () = msg_send![&*e, setDepthStencilState: &*self.depth_test];
             sprites(&e, &self.depth);
-            let e = pass(&t.thickness, Some(0.0), None);
-            sprites(&e, &self.thickness);
+            let e = pass(&t.glow, Some(0.0), None);
+            sprites(&e, &self.glow);
 
-            // Twice across and down, ending back in `depth`.
+            // Down to a quarter, then blurred twice across and down, ending back in `bloom[0]`.
             let e: Id = msg_send![cmd, computeCommandEncoder];
-            let _: () = msg_send![&*e, setComputePipelineState: &*self.smooth];
-            let _: () = msg_send![&*e, setBytes: bytes, length: len, atIndex: 0usize];
-            let tiles = MtlSize { width: size.0.div_ceil(16), height: size.1.div_ceil(16), depth: 1 };
             let tile = MtlSize { width: 16, height: 16, depth: 1 };
-            for (dir, from, to) in [
-                ([1i32, 0], &t.depth, &t.smoothed),
-                ([0, 1], &t.smoothed, &t.depth),
-                ([1, 0], &t.depth, &t.smoothed),
-                ([0, 1], &t.smoothed, &t.depth),
-            ] {
+            let (qw, qh) = (size.0.div_ceil(4), size.1.div_ceil(4));
+            let tiles = MtlSize { width: qw.div_ceil(16), height: qh.div_ceil(16), depth: 1 };
+            let _: () = msg_send![&*e, setComputePipelineState: &*self.bloom_down];
+            let _: () = msg_send![&*e, setTexture: &*t.glow, atIndex: 0usize];
+            let _: () = msg_send![&*e, setTexture: &*t.bloom[0], atIndex: 1usize];
+            let _: () = msg_send![&*e, dispatchThreadgroups: tiles, threadsPerThreadgroup: tile];
+            let _: () = msg_send![&*e, setComputePipelineState: &*self.bloom_blur];
+            let [a, b] = &t.bloom;
+            for (dir, from, to) in [([1i32, 0], a, b), ([0, 1], b, a), ([1, 0], a, b), ([0, 1], b, a)] {
                 let _: () = msg_send![&*e, setTexture: &**from, atIndex: 0usize];
                 let _: () = msg_send![&*e, setTexture: &**to, atIndex: 1usize];
-                let _: () = msg_send![&*e, setBytes: dir.as_ptr().cast::<c_void>(), length: 8usize, atIndex: 1usize];
+                let _: () = msg_send![&*e, setBytes: dir.as_ptr().cast::<c_void>(), length: 8usize, atIndex: 0usize];
                 let _: () = msg_send![&*e, dispatchThreadgroups: tiles, threadsPerThreadgroup: tile];
             }
             let _: () = msg_send![&*e, endEncoding];
 
             let e = pass(target, None, None);
             let _: () = msg_send![&*e, setRenderPipelineState: &*self.composite];
-            let _: () = msg_send![&*e, setFragmentTexture: &*t.depth, atIndex: 0usize];
-            let _: () = msg_send![&*e, setFragmentTexture: &*t.thickness, atIndex: 1usize];
+            let _: () = msg_send![&*e, setFragmentTexture: &*t.glow, atIndex: 0usize];
+            let _: () = msg_send![&*e, setFragmentTexture: &*t.bloom[0], atIndex: 1usize];
             let _: () = msg_send![&*e, setFragmentBytes: bytes, length: len, atIndex: 0usize];
             let _: () = msg_send![&*e, drawPrimitives: TRIANGLE, vertexStart: 0usize, vertexCount: 3usize];
             let _: () = msg_send![&*e, endEncoding];
@@ -640,8 +645,8 @@ fn view_params(yaw: f32, pitch: f32, size: (usize, usize), lift: f32, seconds: f
     let (w, h) = (size.0 as f32, size.1 as f32);
     let scale = 1.0 / 32.0;
     let radius = SPACING * scale * 1.6;
-    // Drops overlap, so their thicknesses add up to more than the water there is.
-    let overlap = (SPACING * scale).powi(3) / (4.0 / 3.0 * std::f32::consts::PI * radius.powi(3));
+    // The colour is sRGB; the shaders add light up linearly.
+    let linear = |c: f64| c.powf(2.2) as f32;
     let (r, g, b) = crate::WATER;
     let sun = normalize([-0.5, 0.75, 0.45]);
     ViewParams {
@@ -650,10 +655,10 @@ fn view_params(yaw: f32, pitch: f32, size: (usize, usize), lift: f32, seconds: f
         inv_view: inverse(&view).unwrap_or(identity),
         inv_proj: inverse(&proj).unwrap_or(identity),
         screen: [w, h, 1.0 / w, 1.0 / h],
-        drop: [radius, scale, GRID as f32 / 2.0, radius * 4.0],
+        drop: [radius, scale, GRID as f32 / 2.0, PLANET * scale],
         sun: [sun[0], sun[1], sun[2], seconds],
         eye: [eye[0], eye[1], eye[2], 1.0],
-        water: [r as f32, g as f32, b as f32, overlap],
+        water: [linear(r), linear(g), linear(b), 0.1],
     }
 }
 
@@ -959,7 +964,7 @@ impl WaterView {
             let texture: Id = msg_send![&*drawable, texture];
             let t = s.start.elapsed().as_secs_f32();
             if t >= s.next_ripple.get() {
-                self.ripple(1.5);
+                self.ripple(1.0);
                 // Every second or so, not quite regularly.
                 let jitter = (s.seed.get() % 1000) as f32 / 1000.0;
                 s.next_ripple.set(t + 0.7 + jitter * 0.8);

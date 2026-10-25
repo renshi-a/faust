@@ -6,9 +6,10 @@ before 1.0, minor versions may change the configuration and the protocol.
 ## Unreleased
 
 - The template's window shows water instead of a line of text: a wall of water falls onto a
-  small planet nobody sees and runs over it, ripples as the user types and follows the
-  pointer. It is a fluid simulated on the GPU and drawn with reflection and refraction, through
-  Metal, which needs no Xcode either.
+  small dark planet and runs over it, ripples as the user types and follows the pointer. It is
+  a fluid simulated on the GPU and drawn as glowing drops on a dark background, in shades that
+  drift around its colour and with foam on the crests, through Metal, which needs no Xcode
+  either. The window is always dark.
 
 ## 0.2.0 (2026-10-25)
 
