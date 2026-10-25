@@ -19,8 +19,9 @@ the source, Faust builds and tests the new version, and the user switches to it 
 everything passes and they agree. If the new version can't start, Faust goes back to the
 last one that did. When you ship an update, it is merged with the user's own changes.
 
-No Xcode is needed on either side of the counter. Faust links with the `rust-lld` that ships
-with Rust, against a tiny SDK it writes itself.
+Neither you nor your users need Xcode to build the app. Faust links with the `rust-lld` that
+ships with Rust, against a tiny SDK it writes itself. Only `faust release` uses Xcode, for
+`notarytool` and `stapler`.
 
 ```
 ┌─ Hello.app ─────────────────────────────────────────────────────────────┐
@@ -64,11 +65,11 @@ flowchart LR
 2. **Users ask for changes.** From the app's menu (or from inside the app, if it can tell what
    the user wants), Faust shows the request and asks before anything happens. Claude Code may
    only read, write and search files in the user's copy of the source.
-3. **Every version passes the same gate.** A sandboxed build with tripwires on every C and
+3. **Every version passes the same checks.** A sandboxed build with tripwires on every C and
    Xcode tool, the app's tests, and its self-test. Then the user decides, and a trial run
    decides again.
-4. **Nothing is lost.** Every version and every candidate is a commit. Going back is a menu
-   item. Your updates are three-way merged with what the user changed, and when the merge
+4. **Old versions are kept.** Every version and every candidate is a commit. Going back is a
+   menu item. Your updates are three-way merged with what the user changed, and when the merge
    conflicts, Claude Code resolves it or the user's changes are set aside on a branch they can
    get back.
 
@@ -87,8 +88,8 @@ faust build                         # dist/Happy Day.app, built without Xcode
 faust dev                           # open it the way a user would
 ```
 
-In the window that opens, choose **Happy Day ▸ Request a Change…** and ask for something:
-"make the text larger", "add a button that says hello back". Faust takes it from there.
+In the window that opens, choose **Happy Day ▸ Request a Change…** and ask for something,
+such as "make the text larger" or "add a button that says hello back". Faust handles the rest.
 
 When you are ready to hand it out:
 
@@ -154,8 +155,8 @@ never calls `ready()` counts as started once it has kept running for a few secon
 messages are plain JSON lines on a socket, [documented](docs/protocol.md) for apps that
 aren't written in Rust.
 
-**`FAUST.md`**, the rules for the assistant: what the app is, what must keep working, what it
-must not touch. `faust new` writes a first version; [Designing repairable apps](docs/repairable-apps.md)
+**`FAUST.md`** holds the rules for the assistant: what the app is, what must keep working, what
+it must not touch. `faust new` writes a first version; [Designing repairable apps](docs/repairable-apps.md)
 has advice on what to put in it.
 
 ## Commands
@@ -169,25 +170,25 @@ has advice on what to put in it.
 | `faust package` | Makes the `.app` users download, from HEAD (`--worktree` for uncommitted changes, `--dmg` for a disk image) |
 | `faust release` | Packages HEAD, signs it with your Developer ID, notarizes and staples the app and a `.dmg` |
 
-`faust build` doubles as a check that an app can be built on a Mac without Xcode: a crate that
-compiles C trips a wire, and the build stops and shows what was called. Rebuilds skip the first link stage
-while the code uses no new system functions, so a one-line change rebuilds in about a second.
+`faust build` also checks that an app can be built on a Mac without Xcode: if a crate compiles
+C, it trips a wire, and the build stops and shows what was called. Rebuilds skip the first link
+stage while the code uses no new system functions, so a one-line change rebuilds in about a second.
 
 ## What keeps users safe
 
-The source can be rewritten, so nothing that protects the user lives in it. The signed
-launcher holds those rules, and the app can't change the launcher.
+The source can be rewritten, so the rules that protect the user live in the signed launcher,
+and the app can't change the launcher.
 
 - **The user approves twice.** Before Claude Code starts, with the request in full; and before
   switching, with the changes one click away.
-- **The assistant has a small box.** Claude Code runs in its restricted mode with only `Read`,
-  `Edit`, `Write`, `Glob` and `Grep`: no shell, no web, no MCP servers, no hooks, and no
-  settings files, not even ones a rewritten source could plant. Protected files
+- **The assistant gets file tools only.** Claude Code runs in its restricted mode with only
+  `Read`, `Edit`, `Write`, `Glob` and `Grep`. It has no shell, web, MCP servers, hooks or
+  settings files, including settings files a rewritten source could plant. Protected files
   (`[repair] protect`) are put back if it touches them.
 - **Building is sandboxed.** Build scripts, proc macros, tests and the self-test run under
   `sandbox-exec`, and may write only to the version's own folder, cargo's output and caches, and
   the temporary folders, never to the repository, the state or the other versions.
-- **Bad versions don't stick.** A version that can't show a window within a minute, or exits
+- **Bad versions are dropped.** A version that can't show a window within a minute, or exits
   early, is dropped, and the previous one comes back.
 - **Remote answers must be signed.** If the app pairs with another device (a phone, say), that
   device can answer Faust's questions only with an Ed25519 signature, over the question it
@@ -235,7 +236,7 @@ inclusion in Faust shall be dual licensed as above, without any additional terms
 
 ## Acknowledgments
 
-Faust stands on [gitoxide](https://github.com/GitoxideLabs/gitoxide) for git without git,
+Faust builds on [gitoxide](https://github.com/GitoxideLabs/gitoxide) for git without git,
 [objc2](https://github.com/madsmtm/objc2) for AppKit without an SDK, the
 [object](https://github.com/gimli-rs/object) crate for reading Mach-O, and
 [Claude Code](https://claude.com/claude-code), which does the rewriting.
