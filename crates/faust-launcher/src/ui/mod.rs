@@ -471,11 +471,38 @@ const FIRST_BUTTON: isize = 1000;
 /// button, so every caller takes it as "not this", like Cancel.
 pub(crate) const DISMISSED: usize = usize::MAX;
 
+/// Writes `window`'s content as a PNG at `path` and exits, for checking a layout.
+pub(crate) fn snapshot(window: &AnyObject, path: &str) -> ! {
+    // SAFETY: caching the content view into a bitmap and writing it as PNG, all documented AppKit.
+    let ok: Bool = unsafe {
+        let content: Id = msg_send![window, contentView];
+        let _: () = msg_send![&*content, layoutSubtreeIfNeeded];
+        let bounds: Rect = msg_send![&*content, bounds];
+        let rep: Id = msg_send![&*content, bitmapImageRepForCachingDisplayInRect: bounds];
+        let _: () = msg_send![&*content, cacheDisplayInRect: bounds, toBitmapImageRep: &*rep];
+        let props: Id = msg_send![class!(NSDictionary), dictionary];
+        let png: Id = msg_send![&*rep, representationUsingType: 4usize, properties: &*props];
+        msg_send![&*png, writeToFile: &*nsstring(path), atomically: Bool::YES]
+    };
+    log(&format!("snapshot {path}: {}", ok.as_bool()));
+    std::process::exit(if ok.as_bool() { 0 } else { 1 });
+}
+
 /// Runs the alert and returns the button pressed, or [`DISMISSED`].
+/// `FAUST_TEST_ALERT_SNAPSHOT=out.png`: the first alert no test answer is left for is written
+/// as an image instead, and the launcher exits.
 fn run_alert(a: &Id, title: &str, buttons: usize) -> usize {
     if let Some(b) = test_button() {
         log(&format!("dialog \"{title}\" -> {b}"));
         return b;
+    }
+    if let Some(path) = crate::launcher::overrides::get("FAUST_TEST_ALERT_SNAPSHOT") {
+        // SAFETY: -[NSAlert layout] and -[NSAlert window] on the main thread.
+        let w: Id = unsafe {
+            let _: () = msg_send![&**a, layout];
+            msg_send![&**a, window]
+        };
+        snapshot(&w, &path);
     }
     activate_self();
     // SAFETY: runModal on the main thread.
@@ -631,6 +658,37 @@ pub(crate) fn ask_text(title: &str, text: &str, initial: &str, ok: &str, cancel:
     })
 }
 
+/// Asks for one line, such as an address or a name, starting from `initial`. `secret` hides
+/// what is typed (an API key). `None` when the second button (cancel) was pressed.
+pub(crate) fn ask_line(title: &str, text: &str, initial: &str, secret: bool, ok: &str, cancel: &str) -> Option<String> {
+    let (title, text, buttons) = (title.to_owned(), text.to_owned(), vec![ok.to_owned(), cancel.to_owned()]);
+    let initial = initial.to_owned();
+    on_main(move || {
+        let a = new_alert(&title, &text, &buttons, false);
+        // SAFETY: an NSTextField (or NSSecureTextField) set as the alert's accessory view.
+        let field: Id = unsafe {
+            let class = if secret { class!(NSSecureTextField) } else { class!(NSTextField) };
+            let f: Allocated<AnyObject> = msg_send![class, alloc];
+            let f: Id = msg_send![f, initWithFrame: rect(0.0, 0.0, 300.0, 24.0)];
+            let _: () = msg_send![&*f, setStringValue: &*nsstring(&initial)];
+            let _: () = msg_send![&*a, setAccessoryView: &*f];
+            let _: () = msg_send![&*a, layout];
+            let w: Id = msg_send![&*a, window];
+            let _: () = msg_send![&*w, setInitialFirstResponder: &*f];
+            f
+        };
+        if let Some(t) = test_answer() {
+            return t.strip_prefix("text:").map(str::to_owned);
+        }
+        if run_alert(&a, &title, buttons.len()) != 0 {
+            return None;
+        }
+        // SAFETY: -[NSTextField stringValue] returns the field's NSString.
+        let s: *mut AnyObject = unsafe { msg_send![&*field, stringValue] };
+        Some(rust_string(s).trim().to_owned())
+    })
+}
+
 /// Lets the user pick one of `items`. Returns (button, item).
 pub(crate) fn pick(title: &str, text: &str, items: &[String], buttons: &[&str]) -> (usize, usize) {
     let (title, text, items, buttons) = (title.to_owned(), text.to_owned(), items.to_vec(), owned(buttons));
@@ -639,7 +697,7 @@ pub(crate) fn pick(title: &str, text: &str, items: &[String], buttons: &[&str]) 
         // SAFETY: an NSPopUpButton filled with NSStrings, set as the alert's accessory view.
         let popup: Id = unsafe {
             let p: Allocated<AnyObject> = msg_send![class!(NSPopUpButton), alloc];
-            let p: Id = msg_send![p, initWithFrame: rect(0.0, 0.0, 440.0, 28.0), pullsDown: Bool::NO];
+            let p: Id = msg_send![p, initWithFrame: rect(0.0, 0.0, 300.0, 28.0), pullsDown: Bool::NO];
             for it in &items {
                 let _: () = msg_send![&*p, addItemWithTitle: &*nsstring(it)];
             }

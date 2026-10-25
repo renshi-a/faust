@@ -10,10 +10,10 @@ use objc2::runtime::{AnyObject, Bool};
 use objc2::{class, msg_send};
 
 use super::{
-    Button, Rect, activate_self, add, app, button, color, label, note, on_main, on_main_async, rect, set_frame,
-    set_text, show_log_title, stack, view,
+    Button, activate_self, add, app, button, color, label, note, on_main, on_main_async, rect, set_frame, set_text,
+    show_log_title, stack, view,
 };
-use crate::launcher::{Event, log, send};
+use crate::launcher::{Event, send};
 use crate::objc::{Id, nsstring};
 
 /// What the pages say.
@@ -271,19 +271,7 @@ fn snapshot(mut w: Window, path: &str) -> ! {
         set_text(&w.line, "info: installing component 'rust-std'");
     }
     show_page(&w);
-    // SAFETY: caching the content view into a bitmap and writing it as PNG, all documented AppKit.
-    let ok: Bool = unsafe {
-        let content: Id = msg_send![&*w.window, contentView];
-        let _: () = msg_send![&*content, layoutSubtreeIfNeeded];
-        let bounds: Rect = msg_send![&*content, bounds];
-        let rep: Id = msg_send![&*content, bitmapImageRepForCachingDisplayInRect: bounds];
-        let _: () = msg_send![&*content, cacheDisplayInRect: bounds, toBitmapImageRep: &*rep];
-        let props: Id = msg_send![class!(NSDictionary), dictionary];
-        let png: Id = msg_send![&*rep, representationUsingType: 4usize, properties: &*props];
-        msg_send![&*png, writeToFile: &*nsstring(path), atomically: Bool::YES]
-    };
-    log(&format!("snapshot {path}: {}", ok.as_bool()));
-    std::process::exit(if ok.as_bool() { 0 } else { 1 });
+    super::snapshot(&w.window, path)
 }
 
 /// Shows `w.page`: the heading, the sidebar, and what the buttons do there.

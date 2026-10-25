@@ -429,6 +429,7 @@ impl Controller {
             let ev = match t.as_str() {
                 "change" => ChildEvent::Change(None),
                 "versions" => ChildEvent::Versions,
+                "assistant.choose" => ChildEvent::ChooseAssistant,
                 "uninstall" => ChildEvent::Uninstall,
                 _ => return,
             };

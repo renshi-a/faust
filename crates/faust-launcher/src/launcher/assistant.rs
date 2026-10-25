@@ -67,6 +67,11 @@ impl Assistant {
         }
     }
 
+    /// Just the version number: "2.1.300".
+    pub(crate) fn short_version(&self) -> &str {
+        self.version.split_whitespace().next().unwrap_or(&self.version)
+    }
+
     /// A Claude Code without restricted mode, which Faust doesn't run.
     pub(crate) fn too_old(&self) -> bool {
         matches!(self.backend, Backend::ClaudeCode { restricted: false, .. })
