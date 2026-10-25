@@ -92,16 +92,6 @@ faust dev                           # builds it without Xcode and opens it the w
 In the window that opens, choose **Happy Day ▸ Request a Change…** and ask for something,
 such as "make the text larger" or "add a button that says hello back". Faust handles the rest.
 
-When you are ready to hand it out, commit and release (releases package what is committed):
-
-```sh
-git init && git add -A && git commit -m "Start Happy Day"
-faust release                       # signs, notarizes and staples the app and a .dmg
-```
-
-The [getting started guide](docs/getting-started.md) goes through the whole loop, including
-breaking a version on purpose to watch Faust roll it back.
-
 ## What an app adds
 
 A repairable app is an ordinary Rust app with three additions.
