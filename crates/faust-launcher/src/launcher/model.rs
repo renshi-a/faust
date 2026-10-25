@@ -257,7 +257,7 @@ fn tool(root: &Path, name: &str, a: &Value) -> Result<String> {
                 }
             }
             let total = text.lines().count();
-            if first + count <= total && out.len() <= MAX_RESULT {
+            if first.saturating_add(count) <= total && out.len() <= MAX_RESULT {
                 out.push_str(&format!("({total} lines in all: read on with offset)\n"));
             }
             Ok(if out.is_empty() { "(empty)".into() } else { out })
@@ -392,7 +392,8 @@ impl Drop for TempFile {
 fn request(e: &Endpoint, path: &str, body: Option<&Value>, log: &Path, limits: Limits<'_>) -> Result<Value> {
     let url = format!("{}/{path}", e.url.trim_end_matches('/'));
     let mut cmd = Command::new("/usr/bin/curl");
-    cmd.args(["-sS", "--max-time", "900", "-w", "\n%{http_code}", "-H", "Content-Type: application/json"]);
+    // `-q` first: no ~/.curlrc, whose proxy or headers would see the key and the source.
+    cmd.args(["-q", "-sS", "--max-time", "900", "-w", "\n%{http_code}", "-H", "Content-Type: application/json"]);
     // The key goes in a file only this user can read, not on the command line, which the log
     // shows and other processes can see.
     let _headers = if e.key.is_empty() {
@@ -493,6 +494,8 @@ mod tests {
         let root = repo();
         let read = tool(&root, "read_file", &json!({"path": "src/main.rs", "offset": 2, "limit": 1})).unwrap();
         assert!(read.starts_with("     2\t    println!(\"Hello!\");\n"), "{read}");
+        let past = tool(&root, "read_file", &json!({"path": "src/main.rs", "offset": u64::MAX})).unwrap();
+        assert!(!past.contains("lines in all"), "{past}");
         let found = tool(&root, "search", &json!({"text": "Hello"})).unwrap();
         assert_eq!(found, "src/main.rs:2: println!(\"Hello!\");");
         let missing = tool(&root, "edit_file", &json!({"path": "src/main.rs", "old_text": "Bye", "new_text": "x"}));

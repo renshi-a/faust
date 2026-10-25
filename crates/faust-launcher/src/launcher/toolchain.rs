@@ -148,7 +148,10 @@ fn download(
     }
     let partial = p.downloads.join(format!("{name}.part"));
     let mut cmd = Command::new("/usr/bin/curl");
-    cmd.args(["--fail", "--location", "--silent", "--show-error", "--retry", "2", "--output"]).arg(&partial).arg(url);
+    // `-q` first: no ~/.curlrc. The download is checked by its hash either way.
+    cmd.args(["-q", "--fail", "--location", "--silent", "--show-error", "--retry", "2", "--output"])
+        .arg(&partial)
+        .arg(url);
     proc::run(cmd, None, &p.log("setup.log"), limits, &mut |o| match o {
         Output::Line(l) => progress(0.0, l),
         Output::Tick => {
