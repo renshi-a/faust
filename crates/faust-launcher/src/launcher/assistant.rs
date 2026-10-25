@@ -307,7 +307,7 @@ fn claude(
         cmd.args(["--resume", id]);
     }
     cmd.current_dir(cwd).env("PATH", search_path());
-    for k in ["FAUST_LINK_FD", "FAUST_VERSION", "FAUST_SUPPORT_DIR"] {
+    for (k, _) in std::env::vars_os().filter(|(k, _)| k.to_string_lossy().starts_with("FAUST_")) {
         cmd.env_remove(k);
     }
     let out = proc::run(cmd, Some(prompt), log, Limits { cancel: limits.cancel, timeout: Some(TIMEOUT) }, &mut |o| {
