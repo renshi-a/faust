@@ -14,6 +14,8 @@ const FILES: &[(&str, &str)] = &[
     (".gitignore", include_str!("../templates/app/gitignore.tmpl")),
     ("src/main.rs", include_str!("../templates/app/src/main.rs")),
     ("src/composer.rs", include_str!("../templates/app/src/composer.rs")),
+    ("src/water.rs", include_str!("../templates/app/src/water.rs")),
+    ("src/water.metal", include_str!("../templates/app/src/water.metal")),
 ];
 
 /// The `faust-link` requirement new apps get: the release of this repository that matches

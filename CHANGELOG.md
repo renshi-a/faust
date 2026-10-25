@@ -3,7 +3,14 @@
 All notable changes to Faust are listed here. Faust follows [Semantic Versioning](https://semver.org);
 before 1.0, minor versions may change the configuration and the protocol.
 
-## 0.2.0 (unreleased)
+## Unreleased
+
+- The template's window shows water instead of a line of text: a wall of water falls onto a
+  small planet nobody sees and runs over it, ripples as the user types and follows the
+  pointer. It is a fluid simulated on the GPU and drawn with reflection and refraction, through
+  Metal, which needs no Xcode either.
+
+## 0.2.0 (2026-10-25)
 
 - Changes can be made by any model with an OpenAI-compatible API, not just Claude Code:
   ChatGPT and Gemini by name with an API key, or a model at an address the user gives (Ollama,

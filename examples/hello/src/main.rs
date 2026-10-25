@@ -1,11 +1,13 @@
 //! Hello: a small macOS app that its users can change by asking.
 //!
-//! It opens one window with a field at the bottom for asking for a change, and its app menu
-//! has "Choose a Version…". Both talk to Faust through `faust_link`, which also tells Faust
-//! when the window is up and hears when to quit. AppKit is loaded at run time and reached
+//! It opens one window with a ball of water that ripples as you type (`water.rs`), a field at
+//! the bottom for asking for a change, and "Choose a Version…" in its app menu. Those talk to
+//! Faust through `faust_link`, which also tells Faust when the window is up and hears when to
+//! quit. AppKit is loaded at run time and reached
 //! through Objective-C messages, so the build needs no SDK and no Xcode.
 
 mod composer;
+mod water;
 
 use std::cell::OnceCell;
 use std::ptr::null;
@@ -16,15 +18,16 @@ use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, class, define_class,
 
 type Id = Retained<AnyObject>;
 
-/// The text in the window. Changing it is a good first request.
-fn greeting() -> &'static str {
-    "Hello! Ask me for a change below."
-}
+/// The water's colour, as sRGB red, green and blue. Changing it is a good first request.
+const WATER: (f64, f64, f64) = (0.20, 0.55, 0.95);
 
 fn main() {
     // `--selftest`: Faust runs this before it uses a new version. Exit 0 means good.
     if std::env::args().any(|a| a == "--selftest") {
-        assert!(!greeting().is_empty(), "the greeting is empty");
+        if let Err(e) = water::selftest() {
+            eprintln!("selftest: {e}");
+            std::process::exit(1);
+        }
         println!("selftest: ok");
         return;
     }
@@ -190,28 +193,33 @@ unsafe impl objc2::Encode for Size {
 }
 
 fn window(mtm: MainThreadMarker, target: &Target) -> Id {
-    // SAFETY: NSWindow, NSTextField and NSView messages on the main thread.
+    // SAFETY: NSWindow and NSView messages on the main thread.
     unsafe {
+        let (width, height) = (560.0, 440.0);
         let w: Allocated<AnyObject> = msg_send![class!(NSWindow), alloc];
         // Titled, closable, miniaturizable, resizable.
-        let w: Id = msg_send![w, initWithContentRect: Rect { x: 0.0, y: 0.0, w: 560.0, h: 360.0 }, styleMask: 15usize, backing: 2usize, defer: Bool::NO];
+        let w: Id = msg_send![w, initWithContentRect: Rect { x: 0.0, y: 0.0, w: width, h: height }, styleMask: 15usize, backing: 2usize, defer: Bool::NO];
         let _: () = msg_send![&*w, setTitle: &*nsstring("Hello")];
         let _: () = msg_send![&*w, setReleasedWhenClosed: Bool::NO];
-        let label: Id = msg_send![class!(NSTextField), wrappingLabelWithString: &*nsstring(greeting())];
-        let font: Id = msg_send![class!(NSFont), systemFontOfSize: 20.0f64];
-        let _: () = msg_send![&*label, setFont: &*font];
-        let _: () = msg_send![&*label, setAlignment: 1isize]; // centered
-        let _: () = msg_send![&*label, setFrame: Rect { x: 40.0, y: 240.0, w: 480.0, h: 80.0 }];
-        let _: () = msg_send![&*label, setAutoresizingMask: 10usize]; // stays at the top, as wide as the window
         let content: Id = msg_send![&*w, contentView];
-        let _: () = msg_send![&*content, addSubview: &*label];
-        if faust_link::get().is_some() {
-            let field = composer::Composer::new(mtm, 520.0, "Ask Hello for a change");
+        // The water fills the window, with the ball in the middle of what the field leaves.
+        let mut covered = 0.0;
+        let field = faust_link::get().map(|_| composer::Composer::new(mtm, width - 40.0, "Ask Hello for a change"));
+        if let Some(f) = &field {
+            let r: Rect = msg_send![&**f, frame];
+            covered = 20.0 + r.h;
+        }
+        let water = water::WaterView::new(mtm, Rect { x: 0.0, y: 0.0, w: width, h: height }, covered);
+        let _: () = msg_send![&*water, setAutoresizingMask: 18usize]; // grows with the window
+        let _: () = msg_send![&*content, addSubview: &*water];
+        if let Some(field) = field {
             let _: () = msg_send![&*field, setFrameOrigin: Point { x: 20.0, y: 20.0 }];
             let _: () = msg_send![&*field, setAutoresizingMask: 34usize]; // stays at the bottom, as wide as the window
             let _: () = msg_send![&*content, addSubview: &*field];
             field.focus();
             let _ = target.ivars().set(field);
+        } else {
+            let _: Bool = msg_send![&*w, makeFirstResponder: &*water];
         }
         let _: () = msg_send![&*w, center];
         w
@@ -223,7 +231,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn greets() {
-        assert!(greeting().starts_with("Hello"));
+    fn water_is_a_colour() {
+        let (r, g, b) = WATER;
+        assert!([r, g, b].iter().all(|c| (0.0..=1.0).contains(c)));
     }
 }
