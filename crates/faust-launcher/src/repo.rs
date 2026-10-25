@@ -319,6 +319,25 @@ impl Repo {
             .collect())
     }
 
+    /// `tree` with the files `pick` chooses as they are in `from`: there when they are there,
+    /// gone when they aren't.
+    pub(crate) fn with_files_from(
+        &self,
+        tree: ObjectId,
+        from: ObjectId,
+        pick: impl Fn(&str) -> bool,
+    ) -> Result<ObjectId> {
+        let (have, want) = (self.files(tree)?, self.files(from)?);
+        let mut editor = self.repo.edit_tree(tree)?;
+        for path in have.keys().filter(|p| pick(p) && !want.contains_key(*p)) {
+            editor.remove(path.as_str())?;
+        }
+        for (path, (kind, id)) in want.iter().filter(|(p, _)| pick(p)) {
+            editor.upsert(path.as_str(), entry_kind(*kind), *id)?;
+        }
+        Ok(editor.write()?.detach())
+    }
+
     pub(crate) fn blob(&self, id: ObjectId) -> Result<Vec<u8>> {
         Ok(self.repo.find_blob(id).with_context(|| format!("blob {id} not found"))?.data.clone())
     }
@@ -517,6 +536,25 @@ mod tests {
 
     const SIG: Signature<'static> = Signature { name: "test", email: "test@faust.invalid", time: 1_700_000_000 };
     const LABELS: MergeLabels<'static> = MergeLabels { base: "base", ours: "yours", theirs: "official" };
+
+    #[test]
+    fn takes_picked_files_from_another_tree_even_when_ignored() {
+        let root = tmp("pick");
+        let r = Repo::open_or_init(&root).unwrap();
+        std::fs::write(root.join("LICENSE"), "MIT").unwrap();
+        std::fs::write(root.join("a.rs"), "a").unwrap();
+        let reference = r.tree_from_dir(&root).unwrap();
+        // An assistant that can't remove LICENSE hides it instead, and adds a protected file.
+        std::fs::write(root.join(".gitignore"), "LICENSE\n").unwrap();
+        std::fs::write(root.join("faust.toml"), "x").unwrap();
+        let tree = r.tree_from_dir(&root).unwrap();
+        assert!(!r.files(tree).unwrap().contains_key("LICENSE"));
+        let fixed = r.with_files_from(tree, reference, |p| p == "LICENSE" || p == "faust.toml").unwrap();
+        let files = r.files(fixed).unwrap();
+        assert_eq!(files.keys().collect::<Vec<_>>(), [".gitignore", "LICENSE", "a.rs"]);
+        assert_eq!(r.blob(files["LICENSE"].1).unwrap(), b"MIT");
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn snapshot_checkout_diff_merge() {
