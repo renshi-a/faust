@@ -77,7 +77,6 @@ impl Controller {
             log(&format!("the app asks for a change: {}", super::controller::short(&request, 80)));
         }
         let hand = self.hand_edit_count();
-        let repo = super::paths::Paths::tilde(&self.p.repo);
         let hand_note = if hand > 0 {
             tr!(
                 en: "{hand} files were changed by hand. They go into the next version too.\n",
@@ -89,24 +88,12 @@ impl Controller {
             String::new()
         };
         loop {
-            let (who, name) = (assistant.title(), assistant.name().to_owned());
-            let sent = match &assistant.backend {
-                assistant::Backend::Model(e) => {
-                    let host = e.host();
-                    tr!(
-                        en: "What it reads is sent to {host}.\n",
-                        ja: "読んだ内容は {host} に送られます。\n",
-                        de: "Was er liest, wird an {host} gesendet.\n",
-                        it: "Ciò che legge viene inviato a {host}.\n",
-                    )
-                }
-                assistant::Backend::ClaudeCode { .. } => String::new(),
-            };
+            let (scope, name) = (self.assistant_scope(&assistant), assistant.name().to_owned());
             let text = tr!(
-                en: "Request:\n{request}\n\nAssistant: {who}\nWhat it may change: {repo} (only inside it)\nWhat it can do: read, write and search files. It can't run commands or reach the internet.\n{sent}{hand_note}\nAfterwards the new version is built and tested, and you're asked again whether to switch to it.",
-                ja: "頼むこと:\n{request}\n\nアシスタント: {who}\n変更してよい場所: {repo}（この中だけ）\nできること: ファイルを読む、書く、探す。コマンドの実行とインターネットへのアクセスはできません。\n{sent}{hand_note}\nそのあと新しいバージョンをビルドしてテストし、切り替えるかをもう一度聞きます。",
-                de: "Anfrage:\n{request}\n\nAssistent: {who}\nWas geändert werden darf: {repo} (nur darin)\nWas er tun kann: Dateien lesen, schreiben und durchsuchen. Befehle ausführen oder ins Internet gehen kann er nicht.\n{sent}{hand_note}\nDanach wird die neue Version gebaut und getestet, und du wirst noch einmal gefragt, ob du wechseln möchtest.",
-                it: "Richiesta:\n{request}\n\nAssistente: {who}\nCosa può modificare: {repo} (solo al suo interno)\nCosa può fare: leggere, scrivere e cercare file. Non può eseguire comandi né accedere a internet.\n{sent}{hand_note}\nPoi la nuova versione viene compilata e testata, e ti verrà chiesto di nuovo se passare a questa versione.",
+                en: "Request:\n{request}\n\n{scope}{hand_note}\nAfterwards the new version is built and tested, and you're asked again whether to switch to it.",
+                ja: "頼むこと:\n{request}\n\n{scope}{hand_note}\nそのあと新しいバージョンをビルドしてテストし、切り替えるかをもう一度聞きます。",
+                de: "Anfrage:\n{request}\n\n{scope}{hand_note}\nDanach wird die neue Version gebaut und getestet, und du wirst noch einmal gefragt, ob du wechseln möchtest.",
+                it: "Richiesta:\n{request}\n\n{scope}{hand_note}\nPoi la nuova versione viene compilata e testata, e ti verrà chiesto di nuovo se passare a questa versione.",
             );
             let title = if from_app {
                 tr!(
@@ -143,6 +130,30 @@ impl Controller {
         let working =
             tr!(en: "Changing {app}", ja: "{app} を変更しています", de: "{app} wird geändert", it: "Modifica di {app}");
         self.start_job(Plan::Change { request, assistant }, &working);
+    }
+
+    /// What the user is told about an assistant before it starts: who it is, what it may
+    /// change, what it can do, and where what it reads is sent. One line each.
+    pub(super) fn assistant_scope(&self, a: &Assistant) -> String {
+        let (who, repo) = (a.title(), super::paths::Paths::tilde(&self.p.repo));
+        let sent = match &a.backend {
+            assistant::Backend::Model(e) => {
+                let host = e.host();
+                tr!(
+                    en: "What it reads is sent to {host}.\n",
+                    ja: "読んだ内容は {host} に送られます。\n",
+                    de: "Was er liest, wird an {host} gesendet.\n",
+                    it: "Ciò che legge viene inviato a {host}.\n",
+                )
+            }
+            assistant::Backend::ClaudeCode { .. } => String::new(),
+        };
+        tr!(
+            en: "Assistant: {who}\nWhat it may change: {repo} (only inside it)\nWhat it can do: read, write and search files. It can't run commands or reach the internet.\n{sent}",
+            ja: "アシスタント: {who}\n変更してよい場所: {repo}（この中だけ）\nできること: ファイルを読む、書く、探す。コマンドの実行とインターネットへのアクセスはできません。\n{sent}",
+            de: "Assistent: {who}\nWas geändert werden darf: {repo} (nur darin)\nWas er tun kann: Dateien lesen, schreiben und durchsuchen. Befehle ausführen oder ins Internet gehen kann er nicht.\n{sent}",
+            it: "Assistente: {who}\nCosa può modificare: {repo} (solo al suo interno)\nCosa può fare: leggere, scrivere e cercare file. Non può eseguire comandi né accedere a internet.\n{sent}",
+        )
     }
 
     /// The assistant the user chose, or else Claude Code if it is installed.

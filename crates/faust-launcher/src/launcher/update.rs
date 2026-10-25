@@ -120,13 +120,15 @@ impl Controller {
         choices.extend([(official.as_str(), Choice::Official), (later.as_str(), Choice::Later)]);
         let buttons: Vec<&str> = choices.iter().map(|c| c.0).collect();
         let release = self.shipped.release.release;
+        // Choosing it starts the assistant, so it is described as in the change dialog.
+        let scope = found.as_ref().map_or_else(String::new, |a| format!("\n\n{}", self.assistant_scope(a).trim_end()));
         let choice = ui::alert(
             &tr!(en: "{title} conflicts with your changes", ja: "{title} とあなたの変更が衝突しました", de: "{title} steht im Konflikt mit deinen Änderungen", it: "{title} è in conflitto con le tue modifiche"),
             &tr!(
-                en: "Conflicting files:\n{list}\n\n“{resolve}”: {name} fixes them so that both are kept.\n“{official}”: your changes are set aside; you can get them back from refs/heads/before/{release} and from the versions kept.\n“{later}”: keep using the current version. You'll be asked again next time.",
-                ja: "衝突したファイル:\n{list}\n\n「{resolve}」: {name} が両方を残すように直します。\n「{official}」: あなたの変更を外します。外した変更は refs/heads/before/{release} と残っているバージョンから戻せます。\n「{later}」: いまのバージョンを使い続けます。次回また聞きます。",
-                de: "Dateien mit Konflikten:\n{list}\n\n„{resolve}“: {name} korrigiert sie so, dass beides erhalten bleibt.\n„{official}“: Deine Änderungen werden beiseitegelegt; du kannst sie aus refs/heads/before/{release} und den aufbewahrten Versionen zurückholen.\n„{later}“: Die aktuelle Version wird weiter verwendet. Beim nächsten Mal wirst du wieder gefragt.",
-                it: "File in conflitto:\n{list}\n\n“{resolve}”: {name} li corregge in modo da tenere entrambe le parti.\n“{official}”: le tue modifiche vengono messe da parte; puoi recuperarle da refs/heads/before/{release} e dalle versioni conservate.\n“{later}”: continui a usare la versione attuale. Ti verrà chiesto di nuovo la prossima volta.",
+                en: "Conflicting files:\n{list}\n\n“{resolve}”: {name} fixes them so that both are kept.\n“{official}”: your changes are set aside; you can get them back from refs/heads/before/{release} and from the versions kept.\n“{later}”: keep using the current version. You'll be asked again next time.{scope}",
+                ja: "衝突したファイル:\n{list}\n\n「{resolve}」: {name} が両方を残すように直します。\n「{official}」: あなたの変更を外します。外した変更は refs/heads/before/{release} と残っているバージョンから戻せます。\n「{later}」: いまのバージョンを使い続けます。次回また聞きます。{scope}",
+                de: "Dateien mit Konflikten:\n{list}\n\n„{resolve}“: {name} korrigiert sie so, dass beides erhalten bleibt.\n„{official}“: Deine Änderungen werden beiseitegelegt; du kannst sie aus refs/heads/before/{release} und den aufbewahrten Versionen zurückholen.\n„{later}“: Die aktuelle Version wird weiter verwendet. Beim nächsten Mal wirst du wieder gefragt.{scope}",
+                it: "File in conflitto:\n{list}\n\n“{resolve}”: {name} li corregge in modo da tenere entrambe le parti.\n“{official}”: le tue modifiche vengono messe da parte; puoi recuperarle da refs/heads/before/{release} e dalle versioni conservate.\n“{later}”: continui a usare la versione attuale. Ti verrà chiesto di nuovo la prossima volta.{scope}",
             ),
             &buttons,
         );
