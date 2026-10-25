@@ -30,6 +30,8 @@ struct Sim {
     float4 impulse; // xyz: where a ripple starts; w: how hard
     float4 fluid;   // x: time step, y: rest density, z: stiffness, w: viscosity
     float4 misc;    // x: fixed-point scale, y: outward burst, z: ripple size
+    float4 swirl;   // xyz: the axis the water turns about, w: how fast (radians per time)
+    float4 tide;    // xyz: the axis the water is drawn out along, w: how hard
     uint4 size;     // x: drops, y: grid side
 };
 
@@ -155,6 +157,12 @@ kernel void grid_update(device Cell *cells [[buffer(0)]],
         v += outward * s.impulse.w * exp(-dot(d, d) / (size * size)) * dt;
     }
     v += outward * s.misc.y * min(r / 6.0, 1.0) * dt;
+    // A tide, as from a moon circling the ball: it draws the water out along one axis and
+    // squeezes it across, and as the axis turns the ball keeps changing shape where it is.
+    v += s.tide.w * (3.0 * dot(out, s.tide.xyz) * s.tide.xyz - out) * dt;
+    // A slow turn about an axis that wanders, so the water never quite settles: the water is
+    // eased toward turning at that rate, which also keeps it from speeding up without end.
+    v += (cross(s.swirl.xyz, out) * s.swirl.w - v) * 0.02 * dt;
     // The grid's walls: nothing leaves through them.
     if (c.x < 2 && v.x < 0.0) v.x = 0.0;
     if (c.y < 2 && v.y < 0.0) v.y = 0.0;
@@ -296,32 +304,21 @@ vertex Full full_vs(uint vid [[vertex_id]]) {
     return f;
 }
 
-constant float FLOOR = -0.62;
-
-static float3 sky(float3 d, constant View &u) {
-    float up = saturate(d.y);
-    float3 c = mix(float3(0.86, 0.90, 0.95), float3(0.09, 0.27, 0.62), pow(up, 0.45));
-    float s = max(dot(d, u.sun.xyz), 0.0);
-    c += float3(1.0, 0.93, 0.82) * (pow(s, 1200.0) * 60.0 + pow(s, 18.0) * 0.35);
+// What the water reflects and refracts: a white photo studio, a grey floor far below, a large
+// softbox toward the sun and a strip light opposite it. (What the camera sees around the ball is
+// plain white.)
+static float3 studio(float3 d, constant View &u) {
+    float3 c = d.y >= 0.0 ? mix(float3(0.80), float3(1.0), smoothstep(0.0, 0.8, d.y))
+                          : mix(float3(0.75), float3(0.38), smoothstep(0.0, -0.3, d.y));
+    float3 key = u.sun.xyz;
+    float k = dot(d, key);
+    c += float3(1.0, 0.98, 0.95) * (smoothstep(0.93, 0.97, k) * 2.5 + pow(max(k, 0.0), 6.0) * 0.25);
+    // The strip: a narrow band, upright, on the other side.
+    float3 strip = normalize(float3(-key.x, 0.2, -key.z));
+    float side = dot(d, strip);
+    float across = abs(dot(d, normalize(cross(strip, float3(0.0, 1.0, 0.0)))));
+    c += float3(1.6) * smoothstep(0.75, 0.85, side) * smoothstep(0.12, 0.06, across);
     return c;
-}
-
-// What a ray from `o` along `d` sees: the sky, or a tiled floor under the ball.
-static float3 world(float3 o, float3 d, constant View &u) {
-    if (d.y > -1e-3) return sky(d, u);
-    float t = (FLOOR - o.y) / d.y;
-    float3 h = o + d * t;
-    float2 tile = floor(h.xz * 3.0);
-    float check = fmod(abs(tile.x + tile.y), 2.0);
-    float3 floor_colour = mix(float3(0.30, 0.31, 0.33), float3(0.78, 0.78, 0.76), check);
-    // Sunlight on the floor, the ball's soft shadow, and the light it gathers inside it.
-    floor_colour *= 0.55 + 0.6 * saturate(u.sun.y);
-    float2 shadow = -u.sun.xz / max(u.sun.y, 0.2) * -FLOOR;
-    float r = length(h.xz - shadow);
-    floor_colour *= mix(0.35, 1.0, smoothstep(0.18, 0.62, r));
-    floor_colour += u.water.rgb * 0.55 * exp(-r * r * 30.0);
-    float3 horizon = sky(normalize(float3(d.x, 0.0, d.z)), u);
-    return mix(horizon, floor_colour, exp(-t * 0.07));
 }
 
 static float3 view_pos(float2 uv, float d, constant View &u) {
@@ -329,12 +326,6 @@ static float3 view_pos(float2 uv, float d, constant View &u) {
     float4 r = u.inv_proj * float4(ndc, 1.0, 1.0);
     float3 ray = r.xyz / r.w;
     return ray * (d / -ray.z);
-}
-
-static float3 tone(float3 c) {
-    // A filmic curve, so the sun's glints roll off instead of clipping.
-    c *= 0.9;
-    return saturate((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14));
 }
 
 fragment float4 composite_fs(Full f [[stage_in]],
@@ -347,7 +338,7 @@ fragment float4 composite_fs(Full f [[stage_in]],
     float3 ray = view_pos(uv, 1.0, u);
     float3 dir = normalize((u.inv_view * float4(ray, 0.0)).xyz);
     float d = depth.read(px).r;
-    if (d <= 0.0) return float4(tone(world(eye, dir, u)), 1.0);
+    if (d <= 0.0) return float4(1.0);
 
     // The surface's normal, from the neighbour on whichever side is closer in depth.
     int2 size = int2(depth.get_width(), depth.get_height());
@@ -378,18 +369,18 @@ fragment float4 composite_fs(Full f [[stage_in]],
     float3 V = normalize(eye - P);
 
     float t = thick.read(px).r;
-    float3 absorb = exp(-t * (1.0 - u.water.rgb) * 9.0);
+    float3 absorb = exp(-t * (1.0 - u.water.rgb) * 4.0);
     float3 refracted = refract(-V, N, 1.0 / 1.33);
-    float3 behind = world(P, normalize(refracted + dir * 0.3), u);
+    // Bent less than a real ball bends it, so the white behind shows through the middle.
+    float3 behind = studio(normalize(mix(dir, refracted, 0.35)), u);
     // Light scattered inside: deep water glows faintly in its own colour.
-    float3 body = behind * absorb + u.water.rgb * u.water.rgb * 0.35 * (1.0 - absorb);
-    float3 reflected = world(P, reflect(-V, N), u);
+    float3 body = behind * absorb + u.water.rgb * u.water.rgb * 0.1 * (1.0 - absorb);
+    float3 reflected = studio(reflect(-V, N), u);
     float fresnel = 0.02 + 0.98 * pow(1.0 - saturate(dot(N, V)), 5.0);
     float3 h = normalize(V + u.sun.xyz);
     float glint = pow(saturate(dot(N, h)), 900.0) * 18.0 + pow(saturate(dot(N, h)), 60.0) * 0.15;
     float3 colour = mix(body, reflected, fresnel) + float3(1.0, 0.95, 0.88) * glint;
-    // Where there is only a film of water, the edge fades into what is behind it.
+    // Where there is only a film of water, the edge fades into the white around it.
     float edge = smoothstep(0.004, 0.04, t);
-    colour = mix(world(eye, dir, u), colour, edge);
-    return float4(tone(colour), 1.0);
+    return float4(mix(float3(1.0), saturate(colour), edge), 1.0);
 }

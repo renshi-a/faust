@@ -81,7 +81,32 @@ struct SimParams {
     impulse: [f32; 4],
     fluid: [f32; 4],
     misc: [f32; 4],
+    swirl: [f32; 4],
+    tide: [f32; 4],
     size: [u32; 4],
+}
+
+/// What pushes the water about in a frame, besides its own weight.
+#[derive(Clone, Copy, Default)]
+struct Forces {
+    /// A ripple: where it starts (grid cells) and how hard.
+    impulse: [f32; 4],
+    /// Every drop thrown outward, this hard.
+    burst: f32,
+    /// The tide: the axis the water is drawn out along, and how hard.
+    tide: [f32; 4],
+    /// The turn: its axis, and how fast.
+    swirl: [f32; 4],
+}
+
+/// The water's own motion `t` seconds in: a tide whose axis circles the ball and whose pull
+/// swells and fades, and a slow turn about an axis that wanders. The rates never line up, so
+/// the ball keeps changing shape without end.
+fn motion(t: f32) -> ([f32; 4], [f32; 4]) {
+    let along = normalize([(t * 0.7).cos(), 0.6 * (t * 0.43).sin(), (t * 0.7).sin()]);
+    let tide = [along[0], along[1], along[2], 0.0009 * (0.6 + 0.4 * (t * 1.1).sin())];
+    let axis = normalize([(t * 0.23).sin(), 1.0, (t * 0.31).cos()]);
+    (tide, [axis[0], axis[1], axis[2], 0.022 * (t * 0.2).sin()])
 }
 
 type Mat = [[f32; 4]; 4];
@@ -392,15 +417,16 @@ impl Fluid {
         })
     }
 
-    /// One frame of simulation, with a ripple at `impulse` (grid cells, strength) and an
-    /// outward `burst`.
-    fn encode(&self, cmd: &AnyObject, impulse: [f32; 4], burst: f32) {
+    /// One frame of simulation.
+    fn encode(&self, cmd: &AnyObject, f: &Forces) {
         let c = GRID as f32 / 2.0;
         let params = SimParams {
             centre: [c, c, c, 0.05],
-            impulse,
+            impulse: f.impulse,
             fluid: [DT, 8.0, 5.0, 0.15],
-            misc: [65_536.0, burst, 3.5, 0.0],
+            misc: [65_536.0, f.burst, 3.5, 0.0],
+            swirl: f.swirl,
+            tide: f.tide,
             size: [self.count as u32, GRID, 0, 0],
         };
         let cells = (GRID * GRID * GRID) as usize;
@@ -581,7 +607,7 @@ impl Renderer {
 /// The camera, from how far round and how far up it is. `lift` is how much of the bottom of
 /// the view is covered (by the field), so the ball sits in the middle of the rest.
 fn view_params(yaw: f32, pitch: f32, size: (usize, usize), lift: f32, seconds: f32) -> ViewParams {
-    let distance = 1.75;
+    let distance = 1.85;
     let eye = [yaw.sin() * pitch.cos() * distance, pitch.sin() * distance, yaw.cos() * pitch.cos() * distance];
     let view = look_at(eye, [0.0, -0.02, 0.0]);
     let proj = perspective(0.75, size.0 as f32 / size.1.max(1) as f32, lift, 0.05, 50.0);
@@ -628,7 +654,8 @@ pub fn selftest() -> Result<(), String> {
             let cmd: Id = msg_send![&*gpu.queue, commandBuffer];
             for frame in 0..90 {
                 let impulse = if frame % 30 == 0 { [32.0, 32.0 + RADIUS, 32.0, 1.2] } else { [0.0; 4] };
-                fluid.encode(&cmd, impulse, 0.0);
+                let (tide, swirl) = motion(frame as f32 / 60.0 * 8.0);
+                fluid.encode(&cmd, &Forces { impulse, burst: 0.0, tide, swirl });
             }
             let _: () = msg_send![&*cmd, commit];
             let _: () = msg_send![&*cmd, waitUntilCompleted];
@@ -685,6 +712,8 @@ pub struct State {
     burst: Cell<f32>,
     seed: Cell<u32>,
     start: std::time::Instant,
+    /// When the water ripples by itself next, in seconds since `start`.
+    next_ripple: Cell<f32>,
     failed: Cell<bool>,
     /// The height at the bottom that something covers, in points.
     covered: f64,
@@ -718,7 +747,7 @@ define_class!(
                 msg_send![&*s, length]
             };
             let before = self.ivars().typed.replace(len);
-            if len == 0 && before > 0 { self.ivars().burst.set(0.8) } else { self.ripple() }
+            if len == 0 && before > 0 { self.ivars().burst.set(0.8) } else { self.ripple(1.2) }
         }
 
         #[unsafe(method(acceptsFirstResponder))]
@@ -729,7 +758,7 @@ define_class!(
 
         #[unsafe(method(keyDown:))]
         fn key_down(&self, _event: *mut AnyObject) {
-            self.ripple();
+            self.ripple(1.2);
         }
 
         #[unsafe(method(mouseDragged:))]
@@ -770,6 +799,7 @@ impl WaterView {
             burst: Cell::new(0.0),
             seed: Cell::new(0x9e37_79b9),
             start: std::time::Instant::now(),
+            next_ripple: Cell::new(1.0),
             failed: Cell::new(false),
             covered,
         };
@@ -789,8 +819,8 @@ impl WaterView {
         }
     }
 
-    /// A ripple from a random spot on the side facing the camera.
-    fn ripple(&self) {
+    /// A ripple from a random spot on the side facing the camera, `strength` hard (a key is 1.2).
+    fn ripple(&self, strength: f32) {
         let s = self.ivars();
         // A small xorshift keeps the spots varied without a dependency.
         let mut x = s.seed.get();
@@ -805,7 +835,7 @@ impl WaterView {
         let d = normalize([towards[0] + next() * 0.9, towards[1] + next() * 0.9, towards[2] + next() * 0.9]);
         s.seed.set(x);
         let c = GRID as f32 / 2.0;
-        s.impulse.set([c + d[0] * RADIUS, c + d[1] * RADIUS, c + d[2] * RADIUS, 1.2]);
+        s.impulse.set([c + d[0] * RADIUS, c + d[1] * RADIUS, c + d[2] * RADIUS, strength]);
     }
 
     fn frame(&self) {
@@ -829,8 +859,17 @@ impl WaterView {
             let drawable: Option<Id> = msg_send![&*scene.layer, nextDrawable];
             let Some(drawable) = drawable else { return };
             let texture: Id = msg_send![&*drawable, texture];
+            let t = s.start.elapsed().as_secs_f32();
+            if t >= s.next_ripple.get() {
+                self.ripple(0.7);
+                // Every second or so, not quite regularly.
+                let jitter = (s.seed.get() % 1000) as f32 / 1000.0;
+                s.next_ripple.set(t + 0.7 + jitter * 0.8);
+            }
+            let (tide, swirl) = motion(t);
             let cmd: Id = msg_send![&*scene.gpu.queue, commandBuffer];
-            scene.fluid.encode(&cmd, s.impulse.get(), s.burst.get());
+            let forces = Forces { impulse: s.impulse.get(), burst: s.burst.get(), tide, swirl };
+            scene.fluid.encode(&cmd, &forces);
             let mut impulse = s.impulse.get();
             impulse[3] *= 0.6;
             s.impulse.set(impulse);
@@ -854,7 +893,7 @@ mod tests {
 
     #[test]
     fn the_shader_structs_have_metals_sizes() {
-        assert_eq!(size_of::<SimParams>(), 80);
+        assert_eq!(size_of::<SimParams>(), 112);
         assert_eq!(size_of::<ViewParams>(), 4 * 64 + 5 * 16);
     }
 
