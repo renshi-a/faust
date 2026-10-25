@@ -119,7 +119,7 @@ fn motion(t: f32) -> ([f32; 4], [f32; 4]) {
     let along = normalize([(t * 0.7).cos(), 0.6 * (t * 0.43).sin(), (t * 0.7).sin()]);
     let tide = [along[0], along[1], along[2], 0.0025 * (0.6 + 0.4 * (t * 1.1).sin())];
     let axis = normalize([(t * 0.23).sin(), 1.0, (t * 0.31).cos()]);
-    (tide, [axis[0], axis[1], axis[2], 0.022 * (t * 0.2).sin()])
+    (tide, [axis[0], axis[1], axis[2], 0.011 * (t * 0.2).sin()])
 }
 
 type Mat = [[f32; 4]; 4];
@@ -782,7 +782,7 @@ define_class!(
                 msg_send![&*s, length]
             };
             let before = self.ivars().typed.replace(len);
-            if len == 0 && before > 0 { self.ivars().burst.set(1.0) } else { self.ripple(2.5) }
+            if len == 0 && before > 0 { self.ivars().burst.set(0.75) } else { self.ripple(4.0) }
         }
 
         #[unsafe(method(acceptsFirstResponder))]
@@ -793,7 +793,7 @@ define_class!(
 
         #[unsafe(method(keyDown:))]
         fn key_down(&self, _event: *mut AnyObject) {
-            self.ripple(2.5);
+            self.ripple(4.0);
         }
 
         /// Follows the pointer over the view, whether or not the window is in front.
@@ -897,7 +897,7 @@ impl WaterView {
         }
     }
 
-    /// A ripple from a random spot on the side facing the camera, `strength` hard (a key is 2.5).
+    /// A ripple from a random spot on the side facing the camera, `strength` hard (a key is 4).
     fn ripple(&self, strength: f32) {
         let s = self.ivars();
         // A small xorshift keeps the spots varied without a dependency.
