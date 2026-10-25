@@ -110,8 +110,7 @@ pub(crate) fn spawn(
     for pipe in pipes.into_iter().flatten() {
         let log_out = log_out.clone();
         std::thread::spawn(move || {
-            for line in BufReader::new(pipe).lines() {
-                let Ok(line) = line else { break };
+            for line in lines(pipe) {
                 let _ = writeln!(log_out.lock().expect("app log poisoned"), "{line}");
             }
         });
@@ -121,8 +120,7 @@ pub(crate) fn spawn(
     ours.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let reader = ours.try_clone()?;
     std::thread::spawn(move || {
-        for line in BufReader::new(reader).lines() {
-            let Ok(line) = line else { break };
+        for line in lines(reader) {
             if let Ok(message) = serde_json::from_str::<Value>(&line) {
                 handle_message(&message, serial, &devices_file);
             }
@@ -138,6 +136,23 @@ pub(crate) fn spawn(
         send(Event::Child(serial, ChildEvent::Exited { code, signal }));
     });
     Ok(Child { pid, serial, writer: Arc::new(Mutex::new(ours)), alive })
+}
+
+/// The lines `r` gives until it ends. Bytes that aren't UTF-8 are replaced rather than ending
+/// the reading: an app whose output nobody drains blocks once the pipe is full.
+fn lines(r: impl Read) -> impl Iterator<Item = String> {
+    let mut r = BufReader::new(r);
+    let mut buf = Vec::new();
+    std::iter::from_fn(move || {
+        buf.clear();
+        match r.read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => None,
+            Ok(_) => {
+                let line = buf.strip_suffix(b"\n").unwrap_or(&buf);
+                Some(String::from_utf8_lossy(line.strip_suffix(b"\r").unwrap_or(line)).into_owned())
+            }
+        }
+    })
 }
 
 /// One message from the app.
@@ -213,5 +228,16 @@ pub(crate) fn describe(code: Option<i32>, signal: Option<i32>) -> String {
         (Some(c), _) => tr!(en: "exit code {c}", ja: "終了コード {c}", de: "Exit-Code {c}", it: "codice di uscita {c}"),
         (_, Some(s)) => tr!(en: "signal {s}", ja: "シグナル {s}", de: "Signal {s}", it: "segnale {s}"),
         _ => tr!(en: "unknown", ja: "不明", de: "unbekannt", it: "sconosciuto"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_on_past_bytes_that_are_not_utf8() {
+        let input: &[u8] = b"one\r\nt\xffo\n{\"type\":\"ready\"}";
+        assert_eq!(lines(input).collect::<Vec<_>>(), ["one", "t\u{fffd}o", r#"{"type":"ready"}"#]);
     }
 }
