@@ -110,8 +110,9 @@ only in a bundle `faust dev` made, or in a `faust` built with the `test-hooks` f
 | `FAUST_LANG` | launcher | `en`, `ja`, `de` or `it` instead of the Mac's language. Passed on to the app. |
 | `FAUST_ASSISTANT` | launcher | The Claude Code executable to use, when the user hasn't chosen another model. |
 | `FAUST_RESOURCES` | launcher | Read the shipped source from this folder instead of the bundle. |
-| `FAUST_TEST_ANSWERS` | launcher | Answers for the next dialogs, separated by `\|`: a button index, `text:…` for a text field, `button:item` for the version list, `install` and `start` for the installer. |
-| `FAUST_TEST_MESSAGES` | launcher | Messages to act on as if the app sent them, one per start: `change`, `versions`, `uninstall`. |
+| `FAUST_TEST_ANSWERS` | launcher | Answers for the next dialogs, separated by `\|`: a button index, `text:…` for a text field, `button:item` for a list, `install` and `start` for the installer. |
+| `FAUST_TEST_MESSAGES` | launcher | Messages to act on as if the app sent them, one per start: `change`, `versions`, `assistant.choose`, `uninstall`. |
 | `FAUST_TEST_QUIT_AFTER` | launcher | Ask the app to quit after this many seconds. |
 | `FAUST_TEST_SNAPSHOT` | launcher | Write the setup window as a PNG and exit (`FAUST_TEST_SNAPSHOT_PAGE=0..3` or `failed`). |
+| `FAUST_TEST_ALERT_SNAPSHOT` | launcher | Write the first dialog no test answer is left for as a PNG and exit. |
 | `FAUST_SIGN_IDENTITY`, `FAUST_NOTARY_PROFILE`, `FAUST_NOTARY_KEY`, `FAUST_NOTARY_KEY_ID`, `FAUST_NOTARY_ISSUER` | `faust release` | Signing identity and notarization credentials. |

@@ -70,14 +70,12 @@ impl Controller {
         let description = self.shipped.config.description();
         let intro = if description.is_empty() { String::new() } else { format!("{description}\n\n") };
         let welcome = tr!(
-            en: "{intro}{app} can change itself. When you ask for a change, an assistant (Claude Code, or a model you choose) rewrites {app}'s source and a new version is built right on this Mac. It is used only if it builds, passes its tests and you agree, and you can always go back.\n\nThis installer puts what that needs on this Mac and builds the first version. It takes a few minutes.\n\nClick “Continue” to see what will be installed. Nothing is installed yet.",
-            ja: "{intro}{app} は自分自身を変えられるアプリです。変更を頼むと、アシスタント（Claude Code か、あなたが選んだモデル）が {app} のソースを書き換え、この Mac の上で新しいバージョンをビルドします。ビルドとテストが通り、あなたが同意したときだけ使われ、いつでも前のバージョンに戻せます。\n\nこのインストーラは、そのために必要なものをこの Mac に入れて、最初のバージョンをビルドします。数分かかります。\n\n「続ける」をクリックすると、インストールするものを確認できます。まだ何もインストールしません。",
-            de: "{intro}{app} kann sich selbst ändern. Wenn du um eine Änderung bittest, schreibt ein Assistent (Claude Code oder ein Modell deiner Wahl) den Quellcode von {app} um, und direkt auf diesem Mac wird eine neue Version gebaut. Sie wird nur verwendet, wenn sie sich bauen lässt, ihre Tests besteht und du zustimmst, und du kannst jederzeit zurück.\n\nDieses Installationsprogramm installiert, was dafür nötig ist, und baut die erste Version. Das dauert ein paar Minuten.\n\nKlicke auf „Fortfahren“, um zu sehen, was installiert wird. Noch wird nichts installiert.",
-            it: "{intro}{app} può cambiare se stessa. Quando chiedi una modifica, un assistente (Claude Code o un modello a tua scelta) riscrive il codice sorgente di {app} e una nuova versione viene compilata direttamente su questo Mac. Viene usata solo se si compila, supera i test e tu sei d'accordo, e puoi sempre tornare indietro.\n\nQuesto programma di installazione mette su questo Mac ciò che serve e compila la prima versione. Ci vorranno alcuni minuti.\n\nFai clic su “Continua” per vedere cosa verrà installato. Per ora non viene installato nulla.",
+            en: "{intro}{app} changes itself when you ask it to.\n\nAn assistant rewrites its source on this Mac.\nA new version is used only if it builds, passes its tests and you agree.\nYou can always go back.\n\nThis installer sets up what that needs and builds the first version, which takes a few minutes.\nNothing is installed until you click “Install”.",
+            ja: "{intro}{app} は、頼むと自分自身を変えられるアプリです。\n\nアシスタントがこの Mac の上でソースを書き換えます。\nビルドとテストが通り、あなたが同意したときだけ、\n新しいバージョンに切り替わります。いつでも前に戻せます。\n\nこのインストーラは、必要なものを入れて\n最初のバージョンをビルドします。数分かかります。\n「インストール」を押すまで、何もインストールしません。",
+            de: "{intro}{app} ändert sich selbst, wenn du darum bittest.\n\nEin Assistent schreibt dazu den Quellcode auf diesem Mac um.\nEine neue Version wird nur verwendet, wenn sie sich bauen lässt, ihre Tests besteht und du zustimmst.\nDu kannst jederzeit zurück.\n\nDieses Installationsprogramm richtet ein, was dafür nötig ist, und baut die erste Version (ein paar Minuten).\nInstalliert wird erst, wenn du auf „Installieren“ klickst.",
+            it: "{intro}{app} cambia se stessa quando glielo chiedi.\n\nUn assistente ne riscrive il codice sorgente su questo Mac.\nUna nuova versione viene usata solo se si compila, supera i test e tu sei d'accordo.\nPuoi sempre tornare indietro.\n\nQuesto programma di installazione prepara ciò che serve e compila la prima versione (alcuni minuti).\nNon viene installato nulla finché non fai clic su “Installa”.",
         );
         let place = Paths::tilde(&self.p.faust);
-        let source = &self.shipped.release.version;
-        let rustup = toolchain::RUSTUP_VERSION;
         let rust_line = if self.p.system_rust {
             tr!(
                 en: "• Rust {rust} from your own rustup (development mode)\n",
@@ -87,39 +85,39 @@ impl Controller {
             )
         } else {
             tr!(
-                en: "• rustup {rustup} and Rust {rust} (rustc, cargo, rust-std), about 540 MB\n",
-                ja: "• rustup {rustup} と Rust {rust}（rustc、cargo、rust-std）、約 540 MB\n",
-                de: "• rustup {rustup} und Rust {rust} (rustc, cargo, rust-std), etwa 540 MB\n",
-                it: "• rustup {rustup} e Rust {rust} (rustc, cargo, rust-std), circa 540 MB\n",
+                en: "• Rust {rust}, about 540 MB\n",
+                ja: "• Rust {rust}（約 540 MB）\n",
+                de: "• Rust {rust}, etwa 540 MB\n",
+                it: "• Rust {rust}, circa 540 MB\n",
             )
         };
         let items = tr!(
-            en: "{rust_line}• The crates the build needs, from crates.io\n• {app}'s source {source} (the copy inside this app), as a git repository\n\nLocation: {place}\nAfter that, the first version is built and tested.",
-            ja: "{rust_line}• ビルドに必要なクレート（crates.io から）\n• {app} のソース {source}（このアプリに入っているもの）を git リポジトリとして\n\n場所: {place}\nそのあと、最初のバージョンをビルドしてテストします。",
-            de: "{rust_line}• Die Crates für den Build, von crates.io\n• Der Quellcode von {app} {source} (aus dieser App) als git-Repository\n\nOrt: {place}\nDanach wird die erste Version gebaut und getestet.",
-            it: "{rust_line}• I crate necessari alla compilazione, da crates.io\n• Il codice sorgente di {app} {source} (quello incluso in questa app) come repository git\n\nPosizione: {place}\nDopo verrà compilata e testata la prima versione.",
+            en: "{rust_line}• The crates the build needs, from crates.io\n• {app}'s source, as a git repository\n\nLocation:\n{place}",
+            ja: "{rust_line}• ビルドに使うクレート（crates.io から）\n• {app} のソース（git リポジトリとして）\n\n場所:\n{place}",
+            de: "{rust_line}• Die Crates für den Build, von crates.io\n• Der Quellcode von {app}, als git-Repository\n\nOrt:\n{place}",
+            it: "{rust_line}• I crate necessari alla compilazione, da crates.io\n• Il codice sorgente di {app}, come repository git\n\nPosizione:\n{place}",
         );
         let notes = tr!(
-            en: "Xcode and the Command Line Tools aren't used, and no administrator password is needed. Your shell settings, ~/.cargo and ~/.rustup are left alone. To undo everything, delete the folder above.",
-            ja: "Xcode と Command Line Tools は使わず、管理者のパスワードも要りません。シェルの設定、~/.cargo、~/.rustup には触れません。すべて元に戻すには、上のフォルダを削除してください。",
-            de: "Xcode und die Command Line Tools werden nicht verwendet, und ein Administratorpasswort ist nicht nötig. Deine Shell-Einstellungen, ~/.cargo und ~/.rustup bleiben unberührt. Um alles rückgängig zu machen, lösche den Ordner oben.",
-            it: "Xcode e i Command Line Tools non vengono usati e non serve la password di amministratore. Le impostazioni della shell, ~/.cargo e ~/.rustup restano intatti. Per annullare tutto, elimina la cartella qui sopra.",
+            en: "No Xcode or administrator password is needed.\n~/.cargo, ~/.rustup and your shell settings stay as they are.\nTo remove everything, delete the folder above.",
+            ja: "Xcode と管理者のパスワードは要りません。\n~/.cargo、~/.rustup、シェルの設定はそのままです。\nすべて消すには、上のフォルダを削除してください。",
+            de: "Xcode und ein Administratorpasswort sind nicht nötig.\n~/.cargo, ~/.rustup und deine Shell-Einstellungen bleiben, wie sie sind.\nUm alles zu entfernen, lösche den Ordner oben.",
+            it: "Non servono Xcode né la password di amministratore.\n~/.cargo, ~/.rustup e le impostazioni della shell restano come sono.\nPer rimuovere tutto, elimina la cartella qui sopra.",
         );
         let assistant = match assistant::find() {
             Some(a) => {
-                let v = a.version;
+                let v = a.short_version();
                 tr!(
-                    en: "Claude Code, which makes the changes: found ({v})",
-                    ja: "変更を行う Claude Code: 見つかりました（{v}）",
-                    de: "Claude Code, das die Änderungen vornimmt: gefunden ({v})",
-                    it: "Claude Code, che apporta le modifiche: trovato ({v})",
+                    en: "Assistant: Claude Code {v}",
+                    ja: "アシスタント: Claude Code {v}",
+                    de: "Assistent: Claude Code {v}",
+                    it: "Assistente: Claude Code {v}",
                 )
             }
             None => tr!(
-                en: "Claude Code, which makes the changes: not found (install it later, or choose another model when you ask for a change)",
-                ja: "変更を行う Claude Code: 見つかりません（あとからインストールするか、変更を頼むときにほかのモデルを選べます）",
-                de: "Claude Code, das die Änderungen vornimmt: nicht gefunden (installiere es später oder wähle ein anderes Modell, wenn du um eine Änderung bittest)",
-                it: "Claude Code, che apporta le modifiche: non trovato (installalo più tardi o scegli un altro modello quando chiedi una modifica)",
+                en: "Assistant: Claude Code wasn't found.\nYou can choose another model when you ask for a change.",
+                ja: "アシスタント: Claude Code は見つかりませんでした。\n変更を頼むときに、ほかのモデルを選べます。",
+                de: "Assistent: Claude Code wurde nicht gefunden.\nDu kannst ein anderes Modell wählen, wenn du um eine Änderung bittest.",
+                it: "Assistente: Claude Code non è stato trovato.\nPuoi scegliere un altro modello quando chiedi una modifica.",
             ),
         };
         let done = tr!(
